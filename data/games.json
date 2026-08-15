@@ -28,8 +28,8 @@
       "name": "Mario Kart",
       "console": "SNES",
       "type": "browser",
-      "cover": "/assets/covers/snes-003.svg",
-      "file": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786785483/mariokartsnes_1_tmjlvl.webp",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786785483/mariokartsnes_1_tmjlvl.webp",
+      "file": "/games/snes/Super Mario Kart (U) [!].smc",
       "genre": "Carreras",
       "players": "1"
     },
