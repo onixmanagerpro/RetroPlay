@@ -1,0 +1,8 @@
+RETROPLAY_PLACEHOLDER
+GAME_ID=snes-001
+NAME=SNES Homebrew Demo
+CONSOLE=SNES
+
+Este NO es un archivo de ROM/ISO real. Es un marcador de posicion generado automaticamente para que la estructura del proyecto RetroPlay quede completa y el flujo de la interfaz (fichas, descargas, boton Jugar) se pueda probar de principio a fin.
+
+Para tener contenido REAL y funcional, sustituye este archivo por un ROM/ISO homebrew o de dominio publico que descargues tu mismo desde una fuente legitima (por ejemplo itch.io, o el repositorio oficial del proyecto homebrew correspondiente), respetando el mismo nombre de archivo que aparece en data/games.json para ese juego.
