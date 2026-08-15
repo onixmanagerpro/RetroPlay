@@ -221,8 +221,6 @@ function renderGameCard(game, { favoriteIds = new Set() } = {}) {
         <h3 class="game-card-title">${escapeHtml(game.name)}</h3>
         <div class="game-card-meta">
           <span>${escapeHtml(game.genre)}</span>
-          <span class="dot"></span>
-          <span>${game.year}</span>
         </div>
       </div>
     </article>
@@ -286,7 +284,6 @@ function renderDownloadCard(game) {
         <div class="download-card-meta">
           <span style="color:${color}">${escapeHtml(game.console)}</span>
           <span>${escapeHtml(game.genre)}</span>
-          <span>${game.year}</span>
         </div>
         <p class="download-card-desc">${escapeHtml(game.description || '')}</p>
       </div>
