@@ -850,6 +850,23 @@ function bindGlobalEvents() {
     }
   });
 
+  // requestFullscreen() se pide sobre .emulator-stage (el contenedor del
+  // padre), no sobre el <iframe> del juego -- así el navbar y los
+  // botones del reproductor siguen siendo clicables en fullscreen. Pero
+  // eso deja el foco de teclado fuera del iframe, donde EmulatorJS
+  // escucha los controles, así que tras CUALQUIER cambio de fullscreen
+  // (botón propio, tecla Esc, F11, o el botón nativo del reproductor)
+  // lo devolvemos explícitamente al juego.
+  document.addEventListener('fullscreenchange', () => {
+    const stage = document.querySelector('.emulator-stage');
+    const emulatorOpen = document.getElementById('emulator-view')?.classList.contains('is-open');
+    if (!emulatorOpen) return;
+    // requestAnimationFrame porque el navegador reasigna el foco de
+    // forma asíncrona al entrar/salir de fullscreen -- llamar a focus()
+    // en el mismo tick del evento a veces no tiene efecto.
+    requestAnimationFrame(() => emulatorController.focusGame());
+  });
+
   document.getElementById('save-gamepad-config').addEventListener('click', async () => {
     await gamepadManager.saveMapping();
     const btn = document.getElementById('save-gamepad-config');
