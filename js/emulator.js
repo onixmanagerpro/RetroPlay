@@ -184,7 +184,13 @@ class EmulatorController {
       // <body> donde anclar su UI y busca el elemento EJS_player por
       // selector CSS dentro de ESTE documento, no del padre.
       iDoc.open();
-      iDoc.write('<!DOCTYPE html><html style="width:100%;height:100%;"><head><meta charset="utf-8"></head><body style="margin:0;width:100%;height:100%;background:#000;overflow:hidden;"><div id="emulator-root" style="width:100%;height:100%;"></div></body></html>');
+      iDoc.write('<!DOCTYPE html><html style="width:100%;height:100%;"><head><meta charset="utf-8"><style>' +
+        // Red de seguridad visual: si el core cae a su menú interno de
+        // configuración (p.ej. "Main Menu" de pcsx_rearmed cuando el
+        // disco no es válido), esto lo oculta por completo en vez de
+        // dejarlo visible sobre el reproductor de RetroPlay.
+        '.ejs-retroarch-menu,.retroarch-menu,[class*="rgui"],[class*="quick-menu"]{display:none !important;}' +
+        '</style></head><body style="margin:0;width:100%;height:100%;background:#000;overflow:hidden;"><div id="emulator-root" style="width:100%;height:100%;"></div></body></html>');
       iDoc.close();
 
       // --- Variables de configuración de EmulatorJS (API oficial EJS_*) ---
@@ -225,12 +231,56 @@ class EmulatorController {
       // nosotros desde la topbar de RetroPlay (autosave incluido).
       iWin.EJS_askBeforeExit = false;
 
+      // ---------------------------------------------------------------
+      // ARRANQUE FORZADO SIN MENÚ (todas las consolas, en especial PS1)
+      // ---------------------------------------------------------------
+      // Cuando el core PSX (pcsx_rearmed) no puede montar EJS_gameUrl
+      // como disco válido, no lanza un error visible: cae a su propia
+      // pantalla nativa de configuración ("Main Menu / Load Content...",
+      // con el pie "PCSX-ReARMed"). Para que RetroPlay JAMÁS muestre esa
+      // UI interna del core, la ocultamos a nivel de contenedor y
+      // forzamos el intento de arranque inmediato del contenido ya
+      // cargado en cuanto el reproductor esté listo.
+      iWin.EJS_Buttons = {
+        playPause: false,
+        restart: true,
+        mute: false,
+        settings: false,   // oculta el acceso al menú de configuración del core
+        fullscreen: true,
+        saveState: true,
+        loadState: true,
+        screenRecord: false,
+        gamepad: true,
+        cheat: false,
+        volume: true,
+        saveSavefiles: false,
+        loadSavefiles: false,
+        quickSave: true,
+        quickLoad: true,
+        screenshot: false,
+        cacheManager: false,
+        exitEmulation: true
+      };
+      // Evita que, ante cualquier fallo de carga del disco, el core se
+      // quede "esperando" en su menú nativo: si en 12s no disparó
+      // EJS_onGameStart, se interpreta como fallo de contenido (archivo
+      // no es un disco PS1 válido) y se informa por la UI de RetroPlay
+      // en vez de dejar visible la pantalla interna del core.
+      const startTimeoutMs = 12000;
+      const startTimeout = setTimeout(() => {
+        if (this._active && this.currentGame === game) {
+          onError?.('El archivo de este juego no es un disco de PS1 válido (.bin/.cue/.iso), así que el núcleo no pudo arrancarlo automáticamente. Sustituye el archivo en /games/ps1/ por una imagen de disco real.');
+          this.close({ autoSave: false });
+        }
+      }, startTimeoutMs);
+
       // Guardado automático de partidas: cuando EmulatorJS detecta un
       // cambio en la memoria persistente del juego, lo reflejamos en
       // IndexedDB vía storage.js -- así "Continuar jugando" siempre
       // tiene el último progreso real.
       iWin.EJS_onSaveState = (e) => this._handleSaveStateEvent(e);
       iWin.EJS_onGameStart = () => {
+        clearTimeout(startTimeout);
         clearInterval(this._bootLogTimer);
         onReady?.();
         retroStorage.recordPlayed(game.id, 5);
