@@ -624,12 +624,20 @@ input, select { font-family: inherit; }
    ========================================================= */
 .game-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  /* auto-fit (no auto-fill): con pocos juegos en una consola, auto-fill
+     reservaba columnas de 168px "fantasma" vacías hasta rellenar todo
+     el ancho de 1600px del contenedor, dejando las 2-3 tarjetas reales
+     encajonadas en su mínimo. auto-fit colapsa esas columnas vacías y
+     reparte el ancho sobrante entre las tarjetas que sí existen -- el
+     max-width en .game-card evita que crezcan demasiado si solo hay 1-2.
+  */
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
   gap: var(--space-4);
 }
 
 .game-card {
   position: relative;
+  max-width: 340px;
   border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--bg-surface);
