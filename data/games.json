@@ -11,7 +11,7 @@
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786787147/dk_1_putrdr.webp",
       "file": "/games/snes/Donkey Kong Country (U) (V1.2) [!].smc",
       "genre": "Plataformas",
-      "players": "1"
+      "players": "2"
     },
     {
       "id": "snes-002",
@@ -21,7 +21,7 @@
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786788025/smw_il8qh7.webp",
       "file": "/games/snes/Super Mario World (V1.0) (E).smc",
       "genre": "Plataformas",
-      "players": "1"
+      "players": "2"
     },
     {
       "id": "snes-003",
@@ -31,7 +31,7 @@
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786785483/mariokartsnes_1_tmjlvl.webp",
       "file": "/games/snes/Super Mario Kart (U) [!].smc",
       "genre": "Carreras",
-      "players": "1"
+      "players": "2"
     },
     {
       "id": "snes-004",
@@ -41,6 +41,46 @@
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786786934/marioallstars_ue2jlh.webp",
       "file": "/games/snes/Super Mario All-Stars (U) [!].smc",
       "genre": "Plataformas",
+      "players": "2"
+    },
+    {
+      "id": "snes-005",
+      "name": "Dragon Ball Z Budokai 3",
+      "console": "SNES",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786793692/2ee5300e-3bfb-4c98-b760-dc6d518d_np1obu.webp",
+      "file": "/games/snes/Dragon Ball Z - Super Butouden 3 (Japan).sfc",
+      "genre": "Lucha",
+      "players": "2"
+    },
+    {
+      "id": "snes-006",
+      "name": "Aladin",
+      "console": "SNES",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786794196/images_bicgiw.webp",
+      "file": "/games/snes/Aladdin (U) [!].smc",
+      "genre": "plataformas",
+      "players": "1"
+    },
+    {
+      "id": "snes-007",
+      "name": "Yoshi's Island",
+      "console": "SNES",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786794474/images_1_ggp2my.webp",
+      "file": "/games/snes/Super Mario World 2 - Yoshi's Island (U) (V1.1).smc",
+      "genre": "plataformas",
+      "players": "1"
+    },
+    {
+      "id": "snes-008",
+      "name": "Street Fighter II Turbo",
+      "console": "SNES",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786794461/images_2_fybhl4.webp",
+      "file": "/games/snes/Street Fighter II Turbo - Hyper Fighting (USA).sfc",
+      "genre": "plataformas",
       "players": "1"
     },
     {
