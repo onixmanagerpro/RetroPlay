@@ -160,7 +160,7 @@ class EmulatorController {
       // <body> donde anclar su UI y busca el elemento EJS_player por
       // selector CSS dentro de ESTE documento, no del padre.
       iDoc.open();
-      iDoc.write('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#000;"><div id="emulator-root"></div></body></html>');
+      iDoc.write('<!DOCTYPE html><html style="width:100%;height:100%;"><head><meta charset="utf-8"></head><body style="margin:0;width:100%;height:100%;background:#000;overflow:hidden;"><div id="emulator-root" style="width:100%;height:100%;"></div></body></html>');
       iDoc.close();
 
       // --- Variables de configuración de EmulatorJS (API oficial EJS_*) ---
