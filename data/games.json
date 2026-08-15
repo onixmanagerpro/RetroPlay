@@ -84,6 +84,16 @@
       "players": "1"
     },
     {
+      "id": "snes-009",
+      "name": "Street Fighter II Turbo",
+      "console": "SNES",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786795176/images_nr3lqb.webp",
+      "file": "/games/snes/Toy Story (USA).gb",
+      "genre": "plataformas",
+      "players": "1"
+    },
+    {
       "id": "megadrive-001",
       "name": "Tanglewood",
       "console": "Mega Drive",
