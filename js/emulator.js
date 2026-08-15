@@ -169,6 +169,27 @@ class EmulatorController {
       iWin.EJS_player = '#emulator-root';
       iWin.EJS_core = coreInfo.core;
       iWin.EJS_gameUrl = new URL(game.file, window.location.href).href;
+      // EJS_pathtodata la usa el reproductor (emulator.min.js) para pedir
+      // los datos pesados de cada core (*-wasm.data, *.wasm...), y ahí sí
+      // queremos el CDN oficial -- no vendorizamos esos binarios.
+      //
+      // PERO loader.js (el bootstrap que carga emulator.min.js) reutiliza
+      // esa MISMA variable para localizarse a sí mismo si no le decimos
+      // otra cosa, así que sin EJS_paths intentaría descargar
+      // emulator.min.js/.css desde el CDN de datos de core, donde no
+      // existen -> "EmulatorJS failed to load. Check for missing files."
+      // EJS_paths mapea por nombre de archivo y loader.js lo consulta
+      // ANTES de caer a EJS_pathtodata, así que fijamos aquí los pocos
+      // ficheros del propio reproductor que sí están vendorizados local.
+      const vendorBase = new URL(EMULATORJS_VENDOR_PATH, window.location.href).href;
+      iWin.EJS_paths = {
+        'emulator.min.js': vendorBase + 'emulator.min.js',
+        'emulator.min.css': vendorBase + 'emulator.min.css',
+        'emulator.js': vendorBase + 'emulator.js',
+        'emulator.css': vendorBase + 'emulator.css',
+        'libunrar.js': vendorBase + 'libunrar.js',
+        'libunrar.wasm': vendorBase + 'libunrar.wasm'
+      };
       iWin.EJS_pathtodata = CORE_DATA_CDN;
       iWin.EJS_gameName = game.name;
       iWin.EJS_backgroundColor = '#000000';
