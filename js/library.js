@@ -191,22 +191,6 @@ function handleCoverError(imgEl, gameId) {
 window.handleCoverError = handleCoverError;
 
 /**
- * Manejador global de carga de portada (onload=""). Compara las
- * dimensiones reales de la imagen ya descargada: si es más ancha que
- * alta (screenshot/boxart panorámico, p.ej. muchas portadas de carreras
- * o de compilaciones), añade la clase que cambia el marco de la tarjeta
- * a 16:9 -- así solo las portadas que de verdad son horizontales se ven
- * en ese formato, y las verticales normales no se tocan.
- */
-function handleCoverLoad(imgEl) {
-  if (!imgEl || !imgEl.parentElement) return;
-  if (imgEl.naturalWidth > imgEl.naturalHeight) {
-    imgEl.parentElement.classList.add('is-landscape');
-  }
-}
-window.handleCoverLoad = handleCoverLoad;
-
-/**
  * Tarjeta de juego estándar (grid de biblioteca / consola / descargas destacadas).
  */
 function renderGameCard(game, { favoriteIds = new Set() } = {}) {
@@ -219,7 +203,6 @@ function renderGameCard(game, { favoriteIds = new Set() } = {}) {
     <article class="game-card" data-game-id="${escapeHtml(game.id)}" tabindex="0" role="button" aria-label="Abrir ficha de ${escapeHtml(game.name)}">
       <div class="game-card-cover">
         <img src="${escapeHtml(game.cover)}" alt="Portada de ${escapeHtml(game.name)}" loading="lazy"
-             onload="handleCoverLoad(this)"
              onerror="handleCoverError(this, '${escapeHtml(game.id)}')" />
         <span class="console-sticker" style="--card-console-color:${color}; background:${color};">${escapeHtml(meta ? meta.short : game.console)}</span>
         <button class="game-card-favorite ${isFav ? 'is-active' : ''}" data-fav-toggle="${escapeHtml(game.id)}" aria-label="${isFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}" aria-pressed="${isFav}">
