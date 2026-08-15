@@ -5,17 +5,17 @@
   "games": [
     {
       "id": "snes-001",
-      "name": "SNES Homebrew Demo",
+      "name": "Donkey Kong",
       "console": "SNES",
       "type": "browser",
       "cover": "/assets/covers/snes-001.svg",
       "file": "/games/snes/games/snes/Donkey Kong Country (U) (V1.2) [!].smc",
       "genre": "Plataformas",
       "year": 2022,
-      "developer": "Comunidad homebrew SNES",
-      "license": "Placeholder de ejemplo (sin atribucion verificada)",
+      "developer": "Onix Manager",
+      "license": "Gratis",
       "verified": false,
-      "description": "Marcador de posición para un juego homebrew de SNES. Sustituye el archivo .sfc en /games/snes por un ROM homebrew o de dominio público real.",
+      "description": "Juego plataformas ",
       "rating": 4.0,
       "players": "1"
     },
