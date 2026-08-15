@@ -8,7 +8,7 @@
       "name": "Donkey Kong",
       "console": "SNES",
       "type": "browser",
-      "cover": "/assets/covers/snes-001.svg",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786787147/dk_1_putrdr.webp",
       "file": "/games/snes/Donkey Kong Country (U) (V1.2) [!].smc",
       "genre": "Plataformas",
       "players": "1"
@@ -18,7 +18,7 @@
       "name": "Mario all-stars",
       "console": "SNES",
       "type": "browser",
-      "cover": "/assets/covers/snes-002.svg",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786786934/marioallstars_ue2jlh.webp",
       "file": "/games/snes/Super Mario All-Stars (U) [!].smc",
       "genre": "Plataformas",
       "players": "1"
