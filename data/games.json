@@ -195,6 +195,16 @@
       "players": "1"
     },
     {
+      "id": "ps1-002",
+      "name": "Crash Team Racing",
+      "console": "PS1",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786837310/images_1_ztlhjk.webp",
+      "file": "https://github.com/onixmanagerpro/RetroPlay/releases/download/ps1games/CTR.-.Crash.Team.Racing.E.No.EDC.SCES-02105.bin.ecm",
+      "genre": "Plataformas",
+      "players": "1"
+    },
+    {
       "id": "ps2-001",
       "name": "PS2 Homebrew Demo Disc",
       "console": "PS2",
