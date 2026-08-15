@@ -185,20 +185,13 @@
     },
     
     {
-      "id": "ps1-002",
-      "name": "PSn00bSDK Demo (n00bdemo)",
+      "id": "ps1-001",
+      "name": "Crash Bandicoot",
       "console": "PS1",
       "type": "browser",
       "cover": "/assets/covers/ps1-002.svg",
-      "file": "/games/ps1/psn00bsdk-demo.bin",
-      "genre": "Demo técnica",
-      "year": 2023,
-      "developer": "Lameguy64 / comunidad PSn00bSDK",
-      "license": "Código abierto (BSD-3-Clause / MIT según componente)",
-      "verified": true,
-      "source": "https://github.com/Lameguy64/PSn00bSDK",
-      "description": "PSn00bSDK es un SDK de código abierto real para PS1 creado por Lameguy64, con una demo técnica incluida llamada n00bdemo. Este placeholder representa esa build; sustitúyelo por el binario real compilado desde el repositorio oficial.",
-      "rating": 3.9,
+      "file": "https://github.com/onixmanagerpro/RetroPlay/releases/download/ps1games/Crash.Bandicoot.USA.bin",
+      "genre": "Plataformas",
       "players": "1"
     },
     {
