@@ -115,6 +115,25 @@ class EmulatorController {
   }
 
   /**
+   * Devuelve el foco de teclado al documento del iframe donde vive el
+   * juego. Necesario tras cualquier cambio de fullscreen: EmulatorJS
+   * escucha "keydown" sobre SU PROPIO document (el del iframe), y
+   * requestFullscreen() en el elemento padre no transfiere el foco al
+   * iframe hijo automáticamente -- el navegador puede dejarlo en el
+   * <body> del documento padre, y entonces los controles de teclado
+   * dejan de responder hasta que se hace clic manualmente dentro del
+   * juego.
+   */
+  focusGame() {
+    const iWin = this._emulatorWindow();
+    if (!iWin) return;
+    // El propio iframe también necesita el foco a nivel de navegador,
+    // no solo su document interno.
+    this._iframe?.focus();
+    iWin.focus();
+  }
+
+  /**
    * Lanza el emulador para un juego dado dentro del contenedor indicado.
    * `hostEl` es el nodo DOM (#emulator-canvas-host) donde se crea el
    * iframe aislado que aloja al reproductor real.
@@ -149,6 +168,11 @@ class EmulatorController {
 
       const iframe = document.createElement('iframe');
       iframe.setAttribute('allow', 'gamepad; fullscreen; autoplay');
+      // Sin este atributo legacy, requestFullscreen() invocado DESDE
+      // dentro del iframe (p.ej. el botón nativo de EmulatorJS) es
+      // rechazado por el navegador aunque la Permissions Policy de
+      // arriba lo permita -- son dos mecanismos distintos.
+      iframe.allowFullscreen = true;
       iframe.style.cssText = 'width:100%; height:100%; border:0; display:block; background:#000;';
       hostEl.appendChild(iframe);
       this._iframe = iframe;
