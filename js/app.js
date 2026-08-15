@@ -305,9 +305,6 @@ function openGameModal(gameId) {
 
   document.getElementById('game-modal-title').textContent = game.name;
   document.getElementById('game-modal-desc').textContent = game.description || '';
-  document.getElementById('game-modal-year').textContent = game.year || '—';
-  document.getElementById('game-modal-dev').textContent = game.developer || '—';
-  document.getElementById('game-modal-license').textContent = game.license || '—';
 
   const sizeBlock = document.getElementById('game-modal-size-block');
   if (game.size) {
@@ -565,7 +562,7 @@ function renderSearchResults(term) {
       <img class="search-result-thumb" src="${escapeHtml(g.cover)}" alt="" onerror="this.style.visibility='hidden'" />
       <div class="search-result-meta">
         <div class="search-result-name">${escapeHtml(g.name)}</div>
-        <div class="search-result-sub">${escapeHtml(g.console)} · ${escapeHtml(g.genre)} · ${g.year}</div>
+        <div class="search-result-sub">${escapeHtml(g.console)} · ${escapeHtml(g.genre)}</div>
       </div>
     </div>
   `).join('');
