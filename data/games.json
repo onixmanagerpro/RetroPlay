@@ -189,7 +189,7 @@
       "name": "Crash Bandicoot",
       "console": "PS1",
       "type": "browser",
-      "cover": "/assets/covers/ps1-002.svg",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786836291/images_nowrlx.webp",
       "file": "https://github.com/onixmanagerpro/RetroPlay/releases/download/ps1games/Crash.Bandicoot.USA.bin",
       "genre": "Plataformas",
       "players": "1"
