@@ -425,39 +425,57 @@ async function triggerDownload(game) {
   });
 
   try {
-    // Igual que en emulator.js: si game.file es una referencia
-    // github-release://..., resolvedFileUrl es la browser_download_url
-    // real devuelta por la API de GitHub (ver js/github-release-source.js);
-    // si no, es game.file tal cual, sin ningún cambio de comportamiento
-    // respecto a la versión anterior.
-    const resolvedFileUrl = await resolveGameFileUrl(game.file);
+    // game.file puede ser un string (un solo archivo, comportamiento de
+    // siempre) o un array (juego multi-archivo, p.ej. PS1 .cue+.bin).
+    // resolveGameFileEntries() normaliza ambos casos a una lista de
+    // { name, url } ya resueltos (github-release://... o ruta local
+    // indistintamente -- ver js/github-release-source.js). Para
+    // descargar, cada archivo se guarda por separado con su nombre real,
+    // porque en el navegador no podemos "reunirlos en una carpeta": el
+    // usuario necesita el .cue y el/los .bin juntos en la misma carpeta
+    // local para poder usarlos luego en un emulador de escritorio.
+    const entries = await window.resolveGameFileEntries(game.file);
+    const isMulti = entries.length > 1;
 
-    const res = await fetch(resolvedFileUrl);
-    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} al descargar ${resolvedFileUrl}`);
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      const res = await fetch(entry.url);
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} al descargar ${entry.name}`);
 
-    const total = Number(res.headers.get('content-length')) || 0;
-    const reader = res.body.getReader();
-    const chunks = [];
-    let received = 0;
+      const total = Number(res.headers.get('content-length')) || 0;
+      const reader = res.body.getReader();
+      const chunks = [];
+      let received = 0;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      received += value.length;
-      if (total) updateToastProgress(game.id, Math.min(100, (received / total) * 100));
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (total) {
+          // Con varios archivos, cada uno ocupa su propio tramo del 0-100%
+          // para que la barra de progreso avance de forma continua en vez
+          // de reiniciar a 0 entre archivo y archivo.
+          const fileProgress = received / total;
+          const overallProgress = ((i + fileProgress) / entries.length) * 100;
+          updateToastProgress(game.id, Math.min(100, overallProgress));
+        }
+      }
+
+      const blob = new Blob(chunks);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = entry.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     }
 
-    const blob = new Blob(chunks);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = resolvedFileUrl.split('/').pop().split('?')[0];
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    finishToast(game.id, true);
+    finishToast(game.id, true, null, isMulti
+      ? `Descargados ${entries.length} archivos -- guárdalos juntos en la misma carpeta.`
+      : null);
   } catch (err) {
     console.warn('[downloads]', err);
     finishToast(game.id, false, err.message || 'No se encontró el archivo. Añade el archivo real en /downloads y actualiza data/games.json, o revisa la referencia github-release://.');
@@ -484,11 +502,11 @@ function updateToastProgress(id, pct) {
   if (fill) fill.style.width = `${pct}%`;
 }
 
-function finishToast(id, success, errorMsg) {
+function finishToast(id, success, errorMsg, successMsg) {
   const el = document.getElementById(`toast-${id}`);
   if (!el) return;
   if (success) {
-    el.querySelector('.toast-sub').textContent = 'Descarga completada';
+    el.querySelector('.toast-sub').textContent = successMsg || 'Descarga completada';
     el.querySelector('.toast-bar-fill').style.width = '100%';
   } else {
     el.querySelector('.toast-title').textContent = 'No se pudo descargar';
