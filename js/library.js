@@ -18,7 +18,8 @@ const PLAYABLE_CONSOLES = [
   { id: 'Mega Drive', label: 'Sega Mega Drive', short: 'Mega Drive', color: 'var(--c-megadrive)', emulatorModule: 'megadrive' },
   { id: 'Nintendo 64', label: 'Nintendo 64', short: 'N64', color: 'var(--c-n64)', emulatorModule: 'n64' },
   { id: 'Dreamcast', label: 'Sega Dreamcast', short: 'Dreamcast', color: 'var(--c-dreamcast)', emulatorModule: 'dreamcast' },
-  { id: 'PS1', label: 'PlayStation 1', short: 'PS1', color: 'var(--c-ps1)', emulatorModule: 'ps1' }
+  { id: 'PS1', label: 'PlayStation 1', short: 'PS1', color: 'var(--c-ps1)', emulatorModule: 'ps1' },
+  { id: 'GBA', label: 'Game Boy Advance', short: 'GBA', color: 'var(--accent-amber)', emulatorModule: 'gba' }
 ];
 
 const DOWNLOAD_CONSOLES = [
