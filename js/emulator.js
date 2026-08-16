@@ -76,7 +76,8 @@ const CONSOLE_CORE_MAP = {
   'Mega Drive': { core: 'segaMD', folder: 'emulators/megadrive' },
   'Nintendo 64': { core: 'n64', folder: 'emulators/n64' },
   'Dreamcast': { core: 'flycast', folder: 'emulators/dreamcast' },
-  'PS1': { core: 'psx', folder: 'emulators/ps1' }
+  'PS1': { core: 'psx', folder: 'emulators/ps1' },
+  'GBA': { core: 'mgba', folder: 'emulators/gba' }
 };
 
 const BOOT_MESSAGES = [
@@ -198,7 +199,18 @@ class EmulatorController {
       // va a leer al ejecutarse dentro de ese mismo documento.
       iWin.EJS_player = '#emulator-root';
       iWin.EJS_core = coreInfo.core;
-      iWin.EJS_gameUrl = new URL(game.file, window.location.href).href;
+      // game.file puede ser una ruta local (/games/snes/...) o una
+      // referencia github-release://owner/repo@tag/fragmento -- en
+      // ese segundo caso, resolveGameFileUrl() consulta la API de
+      // GitHub para obtener la browser_download_url REAL del asset en
+      // vez de que nosotros construyamos esa URL a mano (ver
+      // js/github-release-source.js para el porqué). Si el archivo no
+      // existe, el error llega aquí de forma descriptiva en vez de
+      // como un 404 silencioso más adelante dentro del iframe.
+      const resolvedFileUrl = await resolveGameFileUrl(game.file);
+      iWin.EJS_gameUrl = window.isGithubReleaseRef(game.file)
+        ? resolvedFileUrl // ya es una URL absoluta devuelta por la API de GitHub
+        : new URL(resolvedFileUrl, window.location.href).href;
       // EJS_pathtodata la usa el reproductor (emulator.min.js) para pedir
       // los datos pesados de cada core (*-wasm.data, *.wasm...), y ahí sí
       // queremos el CDN oficial -- no vendorizamos esos binarios.
