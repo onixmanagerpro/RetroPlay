@@ -255,10 +255,19 @@ async function resolveGameFileEntries(fileField) {
       // ahora es la del proxy (/api/github-asset?url=...&name=...), que
       // ya no termina en el nombre de archivo real.
       const asset = await resolveGithubReleaseAsset(ref);
-      return { name: asset.name, url: buildAssetProxyUrl(asset), ref };
+      // asset.size (bytes, reportado por la propia API de GitHub) se
+      // usa en emulator.js para calcular cuánto esperar antes de asumir
+      // que el disco no cargó -- un .bin de PS1 puede pesar cientos de
+      // MB, así que un timeout fijo pensado para ROMs pequeñas de
+      // cartucho no vale aquí. Ver EJS_startTimeoutMs en emulator.js.
+      return { name: asset.name, url: buildAssetProxyUrl(asset), size: asset.size, ref };
     }
     const name = decodeURIComponent(ref.split('/').pop().split('?')[0].split('#')[0]);
-    return { name, url: ref, ref };
+    // Los archivos locales (/games/...) van servidos desde el propio
+    // dominio, sin proxy de por medio, así que no merece la pena hacer
+    // un HEAD solo para conocer el tamaño: se trata como "desconocido"
+    // y emulator.js aplica un timeout base generoso igualmente.
+    return { name, url: ref, size: null, ref };
   }));
 }
 
