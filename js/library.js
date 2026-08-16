@@ -110,12 +110,26 @@ class GameLibrary {
       );
     }
 
+    // Juegos sin "year" (p.ej. la mayoría de SNES/N64/PS1 del catálogo) no
+    // deben quedar fuera de los sorts por year-asc/year-desc: al restar
+    // undefined - undefined el resultado es NaN, y Array.prototype.sort
+    // trata NaN como "iguales" (no reordena), así que esas entradas se
+    // quedaban ancladas en su posición original dentro del array en vez
+    // de mezclarse correctamente con el resto. Usamos un valor por
+    // defecto explícito en vez de dejar que la resta produzca NaN.
+    const yearOrDefault = (g, fallback) => (typeof g.year === 'number' ? g.year : fallback);
+
     results = [...results].sort((a, b) => {
       switch (sort) {
         case 'name-asc': return a.name.localeCompare(b.name, 'es');
         case 'name-desc': return b.name.localeCompare(a.name, 'es');
-        case 'year-asc': return a.year - b.year;
-        case 'year-desc': return b.year - a.year;
+        // Sin year -> se consideran "el más antiguo posible" (-Infinity)
+        // para que no salgan primero en year-asc.
+        case 'year-asc': return yearOrDefault(a, -Infinity) - yearOrDefault(b, -Infinity);
+        // Sin year -> se consideran "el más reciente" (+Infinity) para
+        // que SÍ puedan aparecer en "recién añadidos" en vez de quedar
+        // silenciosamente excluidos por un NaN.
+        case 'year-desc': return yearOrDefault(b, Infinity) - yearOrDefault(a, Infinity);
         default: return 0;
       }
     });
