@@ -98,14 +98,7 @@
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786840892/Dw4enWVXQAAO3mj_jmugsp.webp",
       "file": "/games/megadrive/Sonic The Hedgehog (USA, Europe).md",
-      "genre": "Plataformas / Puzzle",
-      "year": 2018,
-      "developer": "Big Evil Corporation",
-      "license": "Comercial — no incluido; sustituir por versión propia adquirida",
-      "verified": true,
-      "source": "https://en.wikipedia.org/wiki/Tanglewood_(2018_video_game)",
-      "description": "Tanglewood es un juego real homebrew de puzzle-plataformas para Mega Drive, financiado por Kickstarter y publicado por Big Evil Corporation en 2018. Es un título comercial: el archivo .bin no está incluido en este proyecto; añade tu copia legítima para probar el flujo real.",
-      "rating": 4.5,
+      "genre": "Plataformas",
       "players": "1"
     },
     {
@@ -164,7 +157,7 @@
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786837310/images_1_ztlhjk.webp",
       "file": "https://github.com/onixmanagerpro/RetroPlay/releases/download/ps1games/CTR.-.Crash.Team.Racing.E.No.EDC.SCES-02105.bin.ecm",
-      "genre": "Plataformas",
+      "genre": "Carreras",
       "players": "1",
       "year": 1999
     }
