@@ -196,5 +196,54 @@ async function resolveGameFileUrl(fileField) {
   return asset.browser_download_url;
 }
 
+/**
+ * SOPORTE MULTI-ARCHIVO (cue+bin) -- por qué existe esta función
+ * -----------------------------------------------------------------------
+ * Un juego de PS1 con pistas de audio (o cualquier imagen de disco en
+ * formato .cue) NO es un solo archivo: el .cue es un texto que referencia
+ * uno o más .bin por su nombre EXACTO ("FILE "Nombre.bin" BINARY"). Si
+ * solo servimos el .cue, el core (mednafen_psx / pcsx_rearmed) lo lee,
+ * intenta abrir el .bin referenciado, no lo encuentra en el sistema de
+ * archivos virtual del emulador, y falla en silencio o cae al menú
+ * interno del core.
+ *
+ * Un Release de GitHub no permite "una carpeta" como asset: cada archivo
+ * subido (el .cue, cada .bin) es un asset independiente con su propia
+ * browser_download_url. Por eso game.file ahora puede ser tambien un
+ * ARRAY de referencias (mezclando github-release://... y rutas locales
+ * por igual), una por cada archivo que compone el juego:
+ *
+ *   "file": [
+ *     "github-release://owner/repo@tag/Nombre.cue",
+ *     "github-release://owner/repo@tag/Nombre.bin"
+ *   ]
+ *
+ * resolveGameFileEntries() resuelve TODAS las referencias del array en
+ * paralelo y devuelve, para cada una, { name, url }: `name` es el nombre
+ * de archivo tal como debe existir dentro del sistema de archivos del
+ * emulador (debe coincidir con lo que el .cue referencia internamente,
+ * que en la inmensa mayoría de rips coincide con el propio nombre del
+ * asset), y `url` es la browser_download_url real ya resuelta.
+ *
+ * emulator.js usa este resultado para decidir cuál de los archivos es el
+ * "principal" (el .cue/.m3u/.ccd/.toc) -- ese va a EJS_gameUrl -- y monta
+ * el resto como EJS_externalFiles, que EmulatorJS descarga y escribe en
+ * su sistema de archivos virtual ANTES de arrancar el juego. Así, cuando
+ * el core lee el .cue y busca el .bin, ya está ahí.
+ */
+async function resolveGameFileEntries(fileField) {
+  const list = Array.isArray(fileField) ? fileField : [fileField];
+  return Promise.all(list.map(async (ref) => {
+    const url = await resolveGameFileUrl(ref);
+    // El nombre de archivo real es el último segmento de la URL resuelta
+    // (para github-release:// es el nombre exacto del asset en GitHub;
+    // para rutas locales, el nombre del archivo tal cual), no del
+    // fragmento/alias que se haya usado para buscarlo.
+    const name = decodeURIComponent(url.split('/').pop().split('?')[0].split('#')[0]);
+    return { name, url, ref };
+  }));
+}
+
 window.isGithubReleaseRef = isGithubReleaseRef;
 window.resolveGameFileUrl = resolveGameFileUrl;
+window.resolveGameFileEntries = resolveGameFileEntries;
