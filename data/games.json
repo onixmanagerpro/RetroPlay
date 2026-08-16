@@ -1,4 +1,5 @@
 {
+  
   "version": 2,
   "updated": "2026-08-14",
   "note": "Catalogo de EJEMPLO. Las entradas marcadas con verified:true han sido contrastadas con fuentes publicas (ver 'source' en cada una); el resto son placeholders genericos sin atribucion de autoria especifica, pensados unicamente para probar el flujo tecnico de la plataforma (ficha, emulador, descarga). Sustituye cualquier entrada por contenido real del que tengas derecho de uso antes de un despliegue publico.",
