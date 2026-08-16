@@ -1,0 +1,200 @@
+/**
+ * github-release-source.js
+ * -----------------------------------------------------------------------
+ * Resolver de assets alojados en GitHub Releases.
+ *
+ * POR QUÉ EXISTE ESTE ARCHIVO
+ * -----------------------------------------------------------------------
+ * emulator.js y triggerDownload() en app.js hacen fetch(game.file) tal
+ * cual, asumiendo que game.file ya es una URL descargable directamente
+ * (un path relativo local, o -- en teoría -- una URL absoluta a un
+ * asset de un Release). Eso funciona perfecto para archivos servidos
+ * desde el propio dominio de RetroPlay.
+ *
+ * Pero un asset de GitHub Release NO tiene una URL fija y predecible a
+ * partir del nombre del archivo que uno recuerda o adivina. La URL de
+ * descarga directa es:
+ *
+ *   https://github.com/{owner}/{repo}/releases/download/{tag}/{nombre}
+ *
+ * y {nombre} tiene que coincidir EXACTAMENTE, carácter a carácter (con
+ * su extensión, sufijo de versión, mayúsculas, etc.) con el asset que
+ * subió quien creó el release. Si esa cadena no es exacta, GitHub
+ * responde 404 -- ese 404 es el error que reportas ("los juegos que
+ * cargan desde GitHub Release dan error"), y ocurre pase lo que pase
+ * en el resto del pipeline de emulación: fetch() nunca llega a bajar
+ * bytes porque la URL en sí no existe.
+ *
+ * LA SOLUCIÓN: no adivinar la URL. GitHub expone una API real que
+ * devuelve la lista exacta de assets de un release, cada uno con su
+ * browser_download_url ya resuelta:
+ *
+ *   GET https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}
+ *
+ * Este módulo consulta esa API, busca dentro de la lista de assets uno
+ * cuyo nombre coincida (exacto o parcial) con lo que se pide, y
+ * devuelve la browser_download_url real tal como GitHub la reporta --
+ * nunca una URL construida a mano. Así, si el archivo no existe, el
+ * error aparece en la búsqueda ("no se encontró ningún asset que
+ * coincida") en vez de como un 404 silencioso de fetch().
+ *
+ * FORMATO DE `game.file` QUE ESTE MÓDULO ENTIENDE
+ * -----------------------------------------------------------------------
+ * Para diferenciar "archivo local en /games/..." de "asset de un
+ * Release de GitHub", game.file puede usar un pseudo-esquema:
+ *
+ *   github-release://{owner}/{repo}@{tag}/{nombre-o-fragmento}
+ *
+ * Ejemplos:
+ *   github-release://devkitPro/gba-examples@v20240626/template
+ *   github-release://devkitPro/gba-examples@latest/gba-examples
+ *
+ * `{tag}` puede ser un tag exacto o la palabra especial "latest".
+ * `{nombre-o-fragmento}` no necesita ser exacto: basta con que esté
+ * contenido en el nombre real del asset (case-insensitive), así que
+ * "template" encuentra "template.zip" o "template-v2.gba" sin que
+ * tengas que saber el nombre completo de antemano.
+ *
+ * Cualquier game.file que NO empiece por "github-release://" se
+ * considera una URL/ruta normal y este módulo no interviene -- todo tu
+ * catálogo local (/games/snes/..., /downloads/...) sigue funcionando
+ * exactamente igual que antes, sin pasar por aquí.
+ * -----------------------------------------------------------------------
+ */
+
+const GITHUB_RELEASE_SCHEME = 'github-release://';
+
+/**
+ * Cache en memoria de la respuesta de la API por "owner/repo@tag", para
+ * no repetir la consulta si el usuario reintenta cargar el mismo juego
+ * varias veces seguidas en la misma sesión (la API de GitHub sin
+ * autenticar tiene un límite de 60 peticiones/hora por IP).
+ */
+const _releaseCache = new Map();
+
+function isGithubReleaseRef(fileField) {
+  return typeof fileField === 'string' && fileField.startsWith(GITHUB_RELEASE_SCHEME);
+}
+
+/**
+ * Parsea "github-release://owner/repo@tag/fragmento" en sus partes.
+ * Lanza un Error descriptivo (en vez de devolver null) si el formato
+ * no es válido, para que el mensaje de error llegue claro hasta la UI
+ * en lugar de perderse como un 404 genérico.
+ */
+function parseGithubReleaseRef(fileField) {
+  const rest = fileField.slice(GITHUB_RELEASE_SCHEME.length); // owner/repo@tag/fragmento
+  const match = rest.match(/^([^/]+)\/([^@/]+)@([^/]+)\/(.+)$/);
+  if (!match) {
+    throw new Error(
+      `Referencia de GitHub Release mal formada: "${fileField}". ` +
+      `Formato esperado: github-release://owner/repo@tag/nombre-o-fragmento`
+    );
+  }
+  const [, owner, repo, tag, fragment] = match;
+  return { owner, repo, tag, fragment };
+}
+
+/**
+ * Consulta la API de GitHub y devuelve la lista de assets del release
+ * (array de { name, browser_download_url, size, content_type }).
+ * Usa tag "latest" o un tag concreto según lo que se haya pedido.
+ */
+async function _fetchReleaseAssets(owner, repo, tag) {
+  const cacheKey = `${owner}/${repo}@${tag}`;
+  if (_releaseCache.has(cacheKey)) return _releaseCache.get(cacheKey);
+
+  const apiUrl = tag === 'latest'
+    ? `https://api.github.com/repos/${owner}/${repo}/releases/latest`
+    : `https://api.github.com/repos/${owner}/${repo}/releases/tags/${encodeURIComponent(tag)}`;
+
+  const res = await fetch(apiUrl, {
+    headers: { 'Accept': 'application/vnd.github+json' }
+  });
+
+  if (res.status === 404) {
+    throw new Error(
+      `No existe el release "${tag}" en ${owner}/${repo}, o el repositorio ` +
+      `no es público. Comprueba el tag en github.com/${owner}/${repo}/releases`
+    );
+  }
+  if (res.status === 403) {
+    // Límite de peticiones sin autenticar de la API de GitHub (60/hora
+    // por IP). No es un fallo del juego en sí -- conviene decírselo al
+    // usuario tal cual en vez de un "error genérico".
+    throw new Error(
+      'GitHub ha limitado temporalmente las consultas a su API sin ' +
+      'autenticar (60 peticiones/hora por IP). Espera unos minutos e ' +
+      'inténtalo de nuevo.'
+    );
+  }
+  if (!res.ok) {
+    throw new Error(`GitHub API respondió HTTP ${res.status} al consultar el release.`);
+  }
+
+  const data = await res.json();
+  const assets = (data.assets || []).map(a => ({
+    name: a.name,
+    browser_download_url: a.browser_download_url,
+    size: a.size,
+    content_type: a.content_type
+  }));
+
+  _releaseCache.set(cacheKey, assets);
+  return assets;
+}
+
+/**
+ * Dado game.file en formato github-release://..., devuelve la URL
+ * directa y REAL (browser_download_url, tal como la reporta la API de
+ * GitHub) del asset cuyo nombre contiene `fragment` (sin distinguir
+ * mayúsculas/minúsculas).
+ *
+ * Si hay más de una coincidencia, se queda con la más corta (asumiendo
+ * que es la más específica) y avisa por consola de las demás, en vez
+ * de fallar o elegir al azar.
+ */
+async function resolveGithubReleaseAsset(fileField) {
+  const { owner, repo, tag, fragment } = parseGithubReleaseRef(fileField);
+  const assets = await _fetchReleaseAssets(owner, repo, tag);
+
+  if (assets.length === 0) {
+    throw new Error(`El release "${tag}" de ${owner}/${repo} no tiene ningún asset adjunto.`);
+  }
+
+  const needle = fragment.toLowerCase();
+  const matches = assets.filter(a => a.name.toLowerCase().includes(needle));
+
+  if (matches.length === 0) {
+    const disponibles = assets.map(a => a.name).join(', ');
+    throw new Error(
+      `Ningún asset de ${owner}/${repo}@${tag} coincide con "${fragment}". ` +
+      `Assets disponibles en ese release: ${disponibles}`
+    );
+  }
+
+  if (matches.length > 1) {
+    matches.sort((a, b) => a.name.length - b.name.length);
+    console.warn(
+      `[github-release-source] "${fragment}" coincide con ${matches.length} assets; ` +
+      `usando "${matches[0].name}". Coincidencias: ${matches.map(m => m.name).join(', ')}`
+    );
+  }
+
+  return matches[0];
+}
+
+/**
+ * Punto de entrada único usado por emulator.js y app.js:
+ * dado game.file (sea local o github-release://...), devuelve la URL
+ * final ya lista para pasar a fetch()/EJS_gameUrl. Si game.file no usa
+ * el esquema github-release://, se devuelve tal cual sin tocar nada.
+ */
+async function resolveGameFileUrl(fileField) {
+  if (!isGithubReleaseRef(fileField)) return fileField;
+  const asset = await resolveGithubReleaseAsset(fileField);
+  return asset.browser_download_url;
+}
+
+window.isGithubReleaseRef = isGithubReleaseRef;
+window.resolveGameFileUrl = resolveGameFileUrl;
