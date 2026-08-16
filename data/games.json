@@ -107,7 +107,7 @@
       "description": "Tanglewood es un juego real homebrew de puzzle-plataformas para Mega Drive, financiado por Kickstarter y publicado por Big Evil Corporation en 2018. Es un título comercial: el archivo .bin no está incluido en este proyecto; añade tu copia legítima para probar el flujo real.",
       "rating": 4.5,
       "players": "1"
-    }, 
+    },
     {
       "id": "n64-001",
       "name": "Super Mario 64",
@@ -167,8 +167,6 @@
       "genre": "Plataformas",
       "players": "1",
       "year": 1999
-    },
-    
-    
+    }
   ]
 }
