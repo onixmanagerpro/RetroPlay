@@ -185,6 +185,21 @@ async function resolveGithubReleaseAsset(fileField) {
 }
 
 /**
+ * Construye la URL del proxy propio (api/github-asset.js) para un asset
+ * de GitHub Release, en vez de devolver su browser_download_url tal
+ * cual. Es NECESARIO: GitHub no manda cabeceras CORS en la descarga de
+ * assets de Releases (ni en el redirect ni en el storage final), así
+ * que un fetch() desde el navegador a esa URL SIEMPRE falla con
+ * "blocked by CORS policy" -- no importa si el archivo existe y la URL
+ * es exacta, el navegador ni siquiera deja leer la respuesta. Ver el
+ * comentario completo en api/github-asset.js.
+ */
+function buildAssetProxyUrl(asset) {
+  const params = new URLSearchParams({ url: asset.browser_download_url, name: asset.name });
+  return `/api/github-asset?${params.toString()}`;
+}
+
+/**
  * Punto de entrada único usado por emulator.js y app.js:
  * dado game.file (sea local o github-release://...), devuelve la URL
  * final ya lista para pasar a fetch()/EJS_gameUrl. Si game.file no usa
@@ -193,7 +208,7 @@ async function resolveGithubReleaseAsset(fileField) {
 async function resolveGameFileUrl(fileField) {
   if (!isGithubReleaseRef(fileField)) return fileField;
   const asset = await resolveGithubReleaseAsset(fileField);
-  return asset.browser_download_url;
+  return buildAssetProxyUrl(asset);
 }
 
 /**
@@ -234,13 +249,16 @@ async function resolveGameFileUrl(fileField) {
 async function resolveGameFileEntries(fileField) {
   const list = Array.isArray(fileField) ? fileField : [fileField];
   return Promise.all(list.map(async (ref) => {
-    const url = await resolveGameFileUrl(ref);
-    // El nombre de archivo real es el último segmento de la URL resuelta
-    // (para github-release:// es el nombre exacto del asset en GitHub;
-    // para rutas locales, el nombre del archivo tal cual), no del
-    // fragmento/alias que se haya usado para buscarlo.
-    const name = decodeURIComponent(url.split('/').pop().split('?')[0].split('#')[0]);
-    return { name, url, ref };
+    if (isGithubReleaseRef(ref)) {
+      // El nombre real viene del propio asset reportado por la API de
+      // GitHub (resolveGithubReleaseAsset), NO de la URL final: la URL
+      // ahora es la del proxy (/api/github-asset?url=...&name=...), que
+      // ya no termina en el nombre de archivo real.
+      const asset = await resolveGithubReleaseAsset(ref);
+      return { name: asset.name, url: buildAssetProxyUrl(asset), ref };
+    }
+    const name = decodeURIComponent(ref.split('/').pop().split('?')[0].split('#')[0]);
+    return { name, url: ref, ref };
   }));
 }
 
