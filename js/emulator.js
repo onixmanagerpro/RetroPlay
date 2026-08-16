@@ -199,18 +199,41 @@ class EmulatorController {
       // va a leer al ejecutarse dentro de ese mismo documento.
       iWin.EJS_player = '#emulator-root';
       iWin.EJS_core = coreInfo.core;
-      // game.file puede ser una ruta local (/games/snes/...) o una
-      // referencia github-release://owner/repo@tag/fragmento -- en
-      // ese segundo caso, resolveGameFileUrl() consulta la API de
-      // GitHub para obtener la browser_download_url REAL del asset en
-      // vez de que nosotros construyamos esa URL a mano (ver
-      // js/github-release-source.js para el porqué). Si el archivo no
-      // existe, el error llega aquí de forma descriptiva en vez de
-      // como un 404 silencioso más adelante dentro del iframe.
-      const resolvedFileUrl = await resolveGameFileUrl(game.file);
-      iWin.EJS_gameUrl = window.isGithubReleaseRef(game.file)
-        ? resolvedFileUrl // ya es una URL absoluta devuelta por la API de GitHub
-        : new URL(resolvedFileUrl, window.location.href).href;
+      // game.file puede ser:
+      //   - un string: una ruta local (/games/snes/...) o una referencia
+      //     github-release://owner/repo@tag/fragmento (un solo archivo,
+      //     comportamiento de siempre).
+      //   - un ARRAY de strings: un juego multi-archivo (típicamente PS1
+      //     con .cue + uno o más .bin). Cada elemento se resuelve igual
+      //     que el caso anterior (local o github-release://), y luego:
+      //       * el archivo "principal" (.cue/.m3u/.ccd/.toc, o el primero
+      //         si ninguno coincide) se pasa como EJS_gameUrl de siempre.
+      //       * el resto se pasa como EJS_externalFiles: EmulatorJS los
+      //         descarga y los escribe en su filesystem virtual ANTES de
+      //         arrancar el juego, así cuando el core lee el .cue y busca
+      //         el .bin por su nombre, ya está montado.
+      //     Ver js/github-release-source.js (resolveGameFileEntries) para
+      //     el detalle de por qué esto es necesario con GitHub Releases.
+      const entries = await window.resolveGameFileEntries(game.file);
+      const toAbsoluteUrl = (entry) => window.isGithubReleaseRef(entry.ref)
+        ? entry.url // ya es una URL absoluta devuelta por la API de GitHub
+        : new URL(entry.url, window.location.href).href;
+
+      const MAIN_FILE_EXTENSIONS = ['cue', 'm3u', 'ccd', 'toc'];
+      let mainEntry = entries.find(e => MAIN_FILE_EXTENSIONS.includes(
+        e.name.split('.').pop().toLowerCase()
+      ));
+      if (!mainEntry) mainEntry = entries[0];
+
+      iWin.EJS_gameUrl = toAbsoluteUrl(mainEntry);
+
+      const companionEntries = entries.filter(e => e !== mainEntry);
+      if (companionEntries.length > 0) {
+        iWin.EJS_externalFiles = {};
+        for (const entry of companionEntries) {
+          iWin.EJS_externalFiles[entry.name] = toAbsoluteUrl(entry);
+        }
+      }
       // EJS_pathtodata la usa el reproductor (emulator.min.js) para pedir
       // los datos pesados de cada core (*-wasm.data, *.wasm...), y ahí sí
       // queremos el CDN oficial -- no vendorizamos esos binarios.
