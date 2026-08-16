@@ -215,9 +215,12 @@ class EmulatorController {
       //     Ver js/github-release-source.js (resolveGameFileEntries) para
       //     el detalle de por qué esto es necesario con GitHub Releases.
       const entries = await window.resolveGameFileEntries(game.file);
-      const toAbsoluteUrl = (entry) => window.isGithubReleaseRef(entry.ref)
-        ? entry.url // ya es una URL absoluta devuelta por la API de GitHub
-        : new URL(entry.url, window.location.href).href;
+      // Tanto las rutas locales como las de github-release:// (que ahora
+      // pasan por nuestro proxy /api/github-asset, ver
+      // js/github-release-source.js) son URLs relativas al propio
+      // dominio de RetroPlay -- ya no hace falta distinguir el caso
+      // "URL absoluta de GitHub" de antes.
+      const toAbsoluteUrl = (entry) => new URL(entry.url, window.location.href).href;
 
       const MAIN_FILE_EXTENSIONS = ['cue', 'm3u', 'ccd', 'toc'];
       let mainEntry = entries.find(e => MAIN_FILE_EXTENSIONS.includes(
