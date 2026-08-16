@@ -300,11 +300,36 @@ class EmulatorController {
         exitEmulation: true
       };
       // Evita que, ante cualquier fallo de carga del disco, el core se
-      // quede "esperando" en su menú nativo: si en 12s no disparó
-      // EJS_onGameStart, se interpreta como fallo de contenido (archivo
-      // no es un disco PS1 válido) y se informa por la UI de RetroPlay
-      // en vez de dejar visible la pantalla interna del core.
-      const startTimeoutMs = 12000;
+      // quede "esperando" en su menú nativo: si no disparó
+      // EJS_onGameStart en un tiempo prudencial, se interpreta como
+      // fallo de contenido (archivo no es un disco PS1 válido) y se
+      // informa por la UI de RetroPlay en vez de dejar visible la
+      // pantalla interna del core.
+      //
+      // El plazo NO puede ser un número fijo pequeño: un disco de PS1
+      // (.bin) pesa fácilmente cientos de MB, y en juegos multi-archivo
+      // (.cue+.bin) esos MB además pasan por nuestro proxy CORS
+      // (api/github-asset.js, ver github-release-source.js) antes de
+      // llegar al core. Con un timeout fijo de pocos segundos, esta
+      // pantalla de "archivo no válido" saltaba mientras el .bin TODAVÍA
+      // se estaba descargando -- un falso fallo, no un problema real del
+      // archivo. Por eso el plazo se calcula a partir del peso total
+      // conocido de los archivos del juego (entries[].size, viene de la
+      // API de GitHub cuando aplica): una descarga muy lenta de 512KB/s
+      // más un margen fijo para que el core arranque y monte el disco,
+      // con un suelo y un techo razonables para no esperar ni muy poco
+      // ni indefinidamente si el archivo de verdad está roto.
+      const totalBytes = entries.reduce((sum, e) => sum + (e.size || 0), 0);
+      const MIN_ASSUMED_SPEED_BYTES_PER_SEC = 512 * 1024; // 512KB/s, conexión lenta
+      const BOOT_OVERHEAD_MS = 15000; // descarga del core wasm + montaje del FS
+      // El techo (240s) se queda por debajo del límite de streaming de
+      // la función Edge del proxy (300s, ver api/github-asset.js) --no
+      // tiene sentido esperar más que lo que la propia plataforma va a
+      // dejar durar la descarga.
+      const startTimeoutMs = Math.min(240000, Math.max(
+        20000,
+        (totalBytes / MIN_ASSUMED_SPEED_BYTES_PER_SEC) * 1000 + BOOT_OVERHEAD_MS
+      ));
       const startTimeout = setTimeout(() => {
         if (this._active && this.currentGame === game) {
           onError?.('El archivo de este juego no es un disco de PS1 válido (.bin/.cue/.iso), así que el núcleo no pudo arrancarlo automáticamente. Sustituye el archivo en /games/ps1/ por una imagen de disco real.');
