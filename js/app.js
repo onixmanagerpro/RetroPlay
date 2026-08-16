@@ -425,8 +425,15 @@ async function triggerDownload(game) {
   });
 
   try {
-    const res = await fetch(game.file);
-    if (!res.ok || !res.body) throw new Error('Archivo no disponible');
+    // Igual que en emulator.js: si game.file es una referencia
+    // github-release://..., resolvedFileUrl es la browser_download_url
+    // real devuelta por la API de GitHub (ver js/github-release-source.js);
+    // si no, es game.file tal cual, sin ningún cambio de comportamiento
+    // respecto a la versión anterior.
+    const resolvedFileUrl = await resolveGameFileUrl(game.file);
+
+    const res = await fetch(resolvedFileUrl);
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} al descargar ${resolvedFileUrl}`);
 
     const total = Number(res.headers.get('content-length')) || 0;
     const reader = res.body.getReader();
@@ -445,7 +452,7 @@ async function triggerDownload(game) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = game.file.split('/').pop();
+    a.download = resolvedFileUrl.split('/').pop().split('?')[0];
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -453,7 +460,7 @@ async function triggerDownload(game) {
     finishToast(game.id, true);
   } catch (err) {
     console.warn('[downloads]', err);
-    finishToast(game.id, false, 'No se encontró el archivo de ejemplo. Añade el .iso/.pkg real en /downloads y actualiza data/games.json.');
+    finishToast(game.id, false, err.message || 'No se encontró el archivo. Añade el archivo real en /downloads y actualiza data/games.json, o revisa la referencia github-release://.');
   }
 }
 
