@@ -93,6 +93,64 @@ const BOOT_MESSAGES = [
   'Sincronizando entrada de mando…'
 ];
 
+/**
+ * REESCRITURA DE .cue CON LOS NOMBRES REALES DE LOS ASSETS
+ * -----------------------------------------------------------------------
+ * Por qué existe esta función:
+ *
+ * Un .cue es un archivo de TEXTO que referencia su(s) .bin por nombre
+ * EXACTO, carácter a carácter, en líneas del tipo:
+ *
+ *   FILE "Metal Slug X (USA).bin" BINARY
+ *
+ * El nombre que aparece ahí lo decidió quien creó originalmente el rip
+ * (Redump, No-Intro...), normalmente CON espacios y paréntesis: "Nombre
+ * (USA).bin". Pero un asset de GitHub Release en este proyecto puede
+ * llevar ese mismo nombre "normalizado" a puntos, p.ej.
+ * "Metal.Slug.X.USA.bin" -- y si esa normalización no se hizo también
+ * DENTRO del .cue al subirlo, el nombre que pide el .cue y el nombre
+ * real que se monta en EJS_externalFiles dejan de coincidir.
+ *
+ * Cuando eso pasa, pcsx_rearmed (el core PSX) no encuentra el .bin en su
+ * filesystem virtual y NO lanza ningún error visible: cae en silencio a
+ * su menú nativo de configuración ("Main Menu / Load Content..."), que
+ * es justo lo que emulator.js ya se esfuerza en ocultar más abajo
+ * (EJS_Buttons.settings=false, CSS anti-rgui) pero sin arreglar la causa.
+ *
+ * En vez de exigir que el nombre del asset subido a GitHub coincida
+ * SIEMPRE al carácter con lo que el .cue pide por dentro (frágil: un
+ * solo re-subido con nombre "limpio" rompe el juego para siempre), esta
+ * función hace lo contrario: reescribe el TEXTO del .cue para que sus
+ * líneas FILE "..." apunten al nombre real de cada asset compañero ya
+ * resuelto (entries[i].name), emparejando por orden de aparición. Así
+ * el .cue que llega al core siempre referencia exactamente lo que
+ * montamos en EJS_externalFiles, sin importar cómo se llame el asset en
+ * GitHub.
+ *
+ * `cueText` es el contenido del .cue tal cual se descargó.
+ * `companionNames` es la lista de nombres reales (entries[i].name) de
+ * los archivos NO-.cue de este juego, en el mismo orden en que
+ * aparecen en game.file (típicamente solo un .bin, pero se soporta más
+ * de una pista/FILE por si algún juego multi-track lo necesita).
+ * Devuelve el texto del .cue ya corregido.
+ */
+function rewriteCueFileReferences(cueText, companionNames) {
+  if (!companionNames.length) return cueText;
+  let nextCompanion = 0;
+  // Un .cue puede tener varias líneas FILE (multi-track / multi-disco
+  // en un solo .cue). Sustituimos el nombre entre comillas de cada
+  // línea FILE, en el orden en que aparecen, por el siguiente nombre
+  // real disponible -- si hay más líneas FILE que archivos compañeros
+  // conocidos, las sobrantes se dejan tal cual (mejor no tocar lo que
+  // no sabemos resolver que romper una referencia válida).
+  return cueText.replace(/^(\s*FILE\s+")([^"]+)("\s.*)$/gim, (fullLine, prefix, _originalName, suffix) => {
+    if (nextCompanion >= companionNames.length) return fullLine;
+    const realName = companionNames[nextCompanion];
+    nextCompanion++;
+    return `${prefix}${realName}${suffix}`;
+  });
+}
+
 class EmulatorController {
   constructor() {
     this.currentGame = null;
@@ -270,11 +328,6 @@ class EmulatorController {
           reportDownloadProgress();
         })
       ));
-      const blobUrls = blobs.map(blob => {
-        const url = URL.createObjectURL(blob);
-        this._blobUrls.push(url);
-        return url;
-      });
 
       const MAIN_FILE_EXTENSIONS = ['cue', 'm3u', 'ccd', 'toc'];
       let mainIndex = entries.findIndex(e => MAIN_FILE_EXTENSIONS.includes(
@@ -282,9 +335,38 @@ class EmulatorController {
       ));
       if (mainIndex === -1) mainIndex = 0;
 
+      const companionIndexes = entries.map((_, i) => i).filter(i => i !== mainIndex);
+      const mainExtension = entries[mainIndex].name.split('.').pop().toLowerCase();
+
+      // Si el archivo principal es un .cue, su contenido es TEXTO que
+      // referencia sus archivos compañeros (.bin) por nombre exacto --
+      // ver rewriteCueFileReferences() más arriba para el porqué. Lo
+      // reescribimos aquí, ANTES de convertirlo en blob: URL, para que
+      // siempre apunte a los nombres reales que vamos a montar en
+      // EJS_externalFiles, sin importar cómo se llame el asset de
+      // origen en GitHub. Los formatos .m3u/.ccd/.toc no se tocan: son
+      // playlists/índices de otro formato que este proyecto no genera
+      // dinámicamente, así que solo se corrige el caso .cue real.
+      let mainBlob = blobs[mainIndex];
+      if (mainExtension === 'cue' && companionIndexes.length > 0) {
+        const originalCueText = await mainBlob.text();
+        const companionNames = companionIndexes.map(i => entries[i].name);
+        const fixedCueText = rewriteCueFileReferences(originalCueText, companionNames);
+        if (fixedCueText !== originalCueText) {
+          console.info('[emulator] .cue reescrito para que coincida con los nombres reales de los assets montados.');
+        }
+        mainBlob = new Blob([fixedCueText], { type: 'text/plain' });
+      }
+
+      const blobUrls = entries.map((_, i) => {
+        const blob = i === mainIndex ? mainBlob : blobs[i];
+        const url = URL.createObjectURL(blob);
+        this._blobUrls.push(url);
+        return url;
+      });
+
       iWin.EJS_gameUrl = blobUrls[mainIndex];
 
-      const companionIndexes = entries.map((_, i) => i).filter(i => i !== mainIndex);
       if (companionIndexes.length > 0) {
         iWin.EJS_externalFiles = {};
         for (const i of companionIndexes) {
