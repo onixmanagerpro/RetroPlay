@@ -13,7 +13,6 @@
       "file": "/games/snes/Donkey Kong Country (U) (V1.2) [!].smc",
       "genre": "Plataformas",
       "players": "2",
-      "year": 1994
     },
     {
       "id": "snes-002",
@@ -24,7 +23,6 @@
       "file": "/games/snes/Super Mario World (V1.0) (E).smc",
       "genre": "Plataformas",
       "players": "2",
-      "year": 1990
     },
     {
       "id": "snes-003",
@@ -35,7 +33,6 @@
       "file": "/games/snes/Super Mario Kart (U) [!].smc",
       "genre": "Carreras",
       "players": "2",
-      "year": 1992
     },
     {
       "id": "snes-004",
@@ -46,7 +43,6 @@
       "file": "/games/snes/Super Mario All-Stars (U) [!].smc",
       "genre": "Plataformas",
       "players": "2",
-      "year": 1993
     },
     {
       "id": "snes-005",
@@ -57,7 +53,6 @@
       "file": "/games/snes/Dragon Ball Z - Super Butouden 3 (Japan).sfc",
       "genre": "Lucha",
       "players": "2",
-      "year": 1994
     },
     {
       "id": "snes-006",
@@ -68,7 +63,6 @@
       "file": "/games/snes/Aladdin (U) [!].smc",
       "genre": "plataformas",
       "players": "1",
-      "year": 1993
     },
     {
       "id": "snes-007",
@@ -79,7 +73,6 @@
       "file": "/games/snes/Super Mario World 2 - Yoshi's Island (U) (V1.1).smc",
       "genre": "plataformas",
       "players": "1",
-      "year": 1995
     },
     {
       "id": "snes-008",
@@ -90,7 +83,6 @@
       "file": "/games/snes/Street Fighter II Turbo - Hyper Fighting (USA).sfc",
       "genre": "Shooter",
       "players": "1",
-      "year": 1992
     },
     {
       "id": "snes-009",
@@ -101,7 +93,6 @@
       "file": "/games/snes/Parodius (Europe).sfc",
       "genre": "plataformas",
       "players": "1",
-      "year": 1992
     },
     {
       "id": "megadrive-001",
@@ -132,7 +123,6 @@
       "file": "/games/n64/Super Mario 64 (U) [!].z64",
       "genre": "plataformas",
       "players": "1",
-      "year": 1996
     },
     {
       "id": "n64-002",
@@ -143,7 +133,6 @@
       "file": "/games/n64/Mario Kart 64 (E) (V1.1) [!].z64",
       "genre": "Carreras",
       "players": "1",
-      "year": 1996
     },
     {
       "id": "dreamcast-001",
@@ -173,7 +162,16 @@
       ],
       "genre": "Plataformas",
       "players": "1",
-      "year": 1996
+    },
+    {
+      "id": "ps1-002",
+      "name": "Crash Bandicoot -Warped",
+      "console": "PS1",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786939048/Warped_Portada_1_r3sbyz.webp",
+      "file": "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.-.Warped.USA.bin",
+      "genre": "Carreras",
+      "players": "2",
     },
     {
       "id": "ps2-001",
@@ -184,18 +182,6 @@
       "file": "/games/ps2/nombre-del-archivo.iso",
       "genre": "Genero",
       "players": "1",
-      "year": 2003
-    },
-    {
-      "id": "ps1-002",
-      "name": "Crash Team Racing",
-      "console": "PS1",
-      "type": "browser",
-      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786837310/images_1_ztlhjk.webp",
-      "file": "github-release://onixmanagerpro/RetroPlay@ps1games/CTR.-.Crash.Team.Racing.E.No.EDC.SCES-02105.bin.ecm",
-      "genre": "Carreras",
-      "players": "1",
-      "year": 1999
     }
   ]
 }
