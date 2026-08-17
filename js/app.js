@@ -48,7 +48,7 @@ function handleRoute() {
 
   if (root === 'library') {
     if (params.get('filter') === 'favorites') state.library.tab = 'favorites';
-    if (params.get('sort') === 'recent') state.library.sort = 'year-desc';
+    if (params.get('sort') === 'recent') state.library.sort = 'recent';
   }
 
   if (routes[root]) {
@@ -143,7 +143,7 @@ async function renderHome() {
   }
 
   try {
-    const recentAdded = gameLibrary.query({ sort: 'year-desc' }).slice(0, 6);
+    const recentAdded = gameLibrary.query({ sort: 'recent' }).slice(0, 6);
     document.getElementById('recent-added-grid').innerHTML =
       safeRenderList(recentAdded, g => renderGameCard(g, { favoriteIds: state.favoriteIds }));
   } catch (err) {
