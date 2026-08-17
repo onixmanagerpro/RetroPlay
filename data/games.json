@@ -182,12 +182,42 @@
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786939048/Warped_Portada_1_r3sbyz.webp",
       "file":[
+        "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.2.-.Cortex.Strikes.Back.USA.cue",
+        "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.2.-.Cortex.Strikes.Back.USA.bin"
+      ],
+      "genre": "Carreras",
+      "players": "2",
+      "year": 1999
+    },
+    {
+      "id": "ps1-003",
+      "name": "Crash Bandicoot - Warped",
+      "console": "PS1",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786939048/Warped_Portada_1_r3sbyz.webp",
+      "file":[
         "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.-.Warped.USA.cue",
         "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.-.Warped.USA.bin"
       ],
       "genre": "Carreras",
       "players": "2",
       "year": 1999
+    },
+    {
+      "id": "ps1-004",
+      "name": "Tarzan",
+      "console": "PS1",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786940234/images_xbwpk3.webp",
+      "file":[
+        "github-release://onixmanagerpro/RetroPlay@ps1games/Disney.s.Tarzan.USA.v1.1.cue",
+        "github-release://onixmanagerpro/RetroPlay@ps1games/Disney.s.Tarzan.USA.v1.1.Track.1.bin",
+        "github-release://onixmanagerpro/RetroPlay@ps1games/Disney.s.Tarzan.USA.v1.1.Track.2.bin"
+      ],
+      "genre": "Plataformas",
+      "players": "1",
+      "year": 1999
     }
+    
   ]
 }
