@@ -176,6 +176,17 @@
       "year": 1996
     },
     {
+      "id": "ps2-001",
+      "name": "Nombre del juego",
+      "console": "PS2",
+      "type": "browser",
+      "cover": "/assets/covers/ps2-001.svg",
+      "file": "/games/ps2/nombre-del-archivo.iso",
+      "genre": "Genero",
+      "players": "1",
+      "year": 2003
+    },
+    {
       "id": "ps1-002",
       "name": "Crash Team Racing",
       "console": "PS1",
