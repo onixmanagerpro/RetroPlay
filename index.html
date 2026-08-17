@@ -322,8 +322,17 @@
   <div class="emulator-stage">
     <div id="emulator-canvas-host"></div>
     <div class="emulator-boot-screen" id="emulator-boot-screen">
-      <div class="crt-spinner" aria-hidden="true"></div>
-      <div class="emulator-boot-log" id="emulator-boot-log">Iniciando núcleo del emulador…</div>
+      <div class="crt-spinner" id="emulator-boot-spinner" aria-hidden="true"></div>
+      <div class="emulator-download-progress" id="emulator-download-progress">
+        <div class="emulator-download-track">
+          <div class="emulator-download-fill" id="emulator-download-fill"></div>
+        </div>
+        <div class="emulator-download-stats">
+          <span id="emulator-download-percent">0%</span>
+          <span id="emulator-download-bytes" class="emulator-download-bytes"></span>
+        </div>
+      </div>
+      <div class="emulator-boot-log" id="emulator-boot-log">Descargando el juego…</div>
     </div>
   </div>
 
