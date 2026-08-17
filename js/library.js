@@ -111,29 +111,25 @@ class GameLibrary {
       );
     }
 
-    // Juegos sin "year" (p.ej. la mayoría de SNES/N64/PS1 del catálogo) no
-    // deben quedar fuera de los sorts por year-asc/year-desc: al restar
-    // undefined - undefined el resultado es NaN, y Array.prototype.sort
-    // trata NaN como "iguales" (no reordena), así que esas entradas se
-    // quedaban ancladas en su posición original dentro del array en vez
-    // de mezclarse correctamente con el resto. Usamos un valor por
-    // defecto explícito en vez de dejar que la resta produzca NaN.
-    const yearOrDefault = (g, fallback) => (typeof g.year === 'number' ? g.year : fallback);
-
-    results = [...results].sort((a, b) => {
-      switch (sort) {
-        case 'name-asc': return a.name.localeCompare(b.name, 'es');
-        case 'name-desc': return b.name.localeCompare(a.name, 'es');
-        // Sin year -> se consideran "el más antiguo posible" (-Infinity)
-        // para que no salgan primero en year-asc.
-        case 'year-asc': return yearOrDefault(a, -Infinity) - yearOrDefault(b, -Infinity);
-        // Sin year -> se consideran "el más reciente" (+Infinity) para
-        // que SÍ puedan aparecer en "recién añadidos" en vez de quedar
-        // silenciosamente excluidos por un NaN.
-        case 'year-desc': return yearOrDefault(b, Infinity) - yearOrDefault(a, Infinity);
-        default: return 0;
-      }
-    });
+    // "recent" = orden de "recién añadido": no hay campo de fecha de alta,
+    // así que se usa el orden natural del array de data/games.json, donde
+    // las entradas añadidas más tarde al catálogo van al final. Se ordenan
+    // por índice original descendente (último del array primero) en vez
+    // de reordenar por nombre.
+    if (sort === 'recent') {
+      results = results
+        .map((g, originalIndex) => ({ g, originalIndex }))
+        .sort((a, b) => b.originalIndex - a.originalIndex)
+        .map(x => x.g);
+    } else {
+      results = [...results].sort((a, b) => {
+        switch (sort) {
+          case 'name-asc': return a.name.localeCompare(b.name, 'es');
+          case 'name-desc': return b.name.localeCompare(a.name, 'es');
+          default: return 0;
+        }
+      });
+    }
 
     return results;
   }
