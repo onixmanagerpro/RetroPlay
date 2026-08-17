@@ -271,6 +271,61 @@ async function resolveGameFileEntries(fileField) {
   }));
 }
 
+/**
+ * DESCARGA CON PROGRESO REAL -- por qué existe esta función
+ * -----------------------------------------------------------------------
+ * Los juegos de PS1 (.bin/.cue) pesan habitualmente cientos de MB, así
+ * que la descarga tarda de verdad y NO es aceptable dejar a la persona
+ * mirando un spinner sin saber si algo se está moviendo o si se quedó
+ * colgado. fetch() normal no expone progreso -- solo la promesa resuelta
+ * al final -- así que aquí leemos el body como stream con
+ * response.body.getReader() y vamos acumulando bytes nosotros mismos,
+ * igual que hace EmulatorJS internamente para sus propias descargas.
+ *
+ * Devuelve un Blob con los bytes completos (no un ArrayBuffer) porque el
+ * llamador lo va a convertir en un blob: URL vía URL.createObjectURL,
+ * que es lo que se le pasa a EJS_gameUrl / EJS_externalFiles para que
+ * EmulatorJS monte el archivo sin tener que re-descargarlo.
+ *
+ * `onProgress(loadedBytes, totalBytes)` se llama en cada chunk recibido.
+ * `totalBytes` puede ser null si el servidor no informó Content-Length
+ * (pasa con algunos archivos locales servidos sin esa cabecera) -- en
+ * ese caso el llamador debe caer a un indicador indeterminado.
+ */
+async function fetchWithProgress(url, onProgress) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} al descargar ${url}`);
+  }
+
+  const contentLengthHeader = response.headers.get('content-length');
+  const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : null;
+
+  // Si el navegador no expone un stream legible (muy improbable hoy en
+  // día, pero por si acaso) caemos a un blob() normal sin progreso
+  // incremental -- sigue funcionando, solo sin barra granular.
+  if (!response.body || !response.body.getReader) {
+    const blob = await response.blob();
+    onProgress?.(blob.size, totalBytes ?? blob.size);
+    return blob;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let loadedBytes = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loadedBytes += value.length;
+    onProgress?.(loadedBytes, totalBytes);
+  }
+
+  return new Blob(chunks);
+}
+
 window.isGithubReleaseRef = isGithubReleaseRef;
 window.resolveGameFileUrl = resolveGameFileUrl;
 window.resolveGameFileEntries = resolveGameFileEntries;
+window.fetchWithProgress = fetchWithProgress;
