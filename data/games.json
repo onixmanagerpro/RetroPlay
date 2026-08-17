@@ -177,15 +177,15 @@
     },
     {
       "id": "ps1-002",
-      "name": "Crash Bandicoot - Warped",
+      "name": "Crash Bandicoot 2",
       "console": "PS1",
       "type": "browser",
-      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786939048/Warped_Portada_1_r3sbyz.webp",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786940325/images_1_ifhkvf.webp",
       "file":[
         "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.2.-.Cortex.Strikes.Back.USA.cue",
         "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.2.-.Cortex.Strikes.Back.USA.bin"
       ],
-      "genre": "Carreras",
+      "genre": "Plataformas",
       "players": "2",
       "year": 1999
     },
