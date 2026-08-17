@@ -176,23 +176,15 @@
       "year": 1996
     },
     {
-      "id": "ps2-001",
-      "name": "Nombre del juego",
-      "console": "PS2",
-      "type": "browser",
-      "cover": "/assets/covers/ps2-001.svg",
-      "file": "/games/ps2/nombre-del-archivo.iso",
-      "genre": "Genero",
-      "players": "1",
-      "year": 2003
-    },
-    {
       "id": "ps1-002",
       "name": "Crash Team Racing",
       "console": "PS1",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786837310/images_1_ztlhjk.webp",
-      "file": "github-release://onixmanagerpro/RetroPlay@ps1games/CTR.-.Crash.Team.Racing.E.No.EDC.SCES-02105.bin.ecm",
+      "file":[
+        "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.-.Warped.USA.cue",
+        "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.-.Warped.USA.bin"
+      ],
       "genre": "Carreras",
       "players": "1",
       "year": 1999
