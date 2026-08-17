@@ -153,12 +153,6 @@
       "cover": "/assets/covers/dreamcast-001.svg",
       "file": "/games/dreamcast/rush-rush-demo.cdi",
       "genre": "Demo técnica",
-      "year": 2021,
-      "developer": "Comunidad homebrew Dreamcast",
-      "license": "Placeholder de ejemplo (sin atribucion verificada)",
-      "verified": false,
-      "description": "Marcador de posición para un homebrew de Dreamcast. La escena activa de Dreamcast usa el SDK abierto KallistiOS — sustituye este archivo por un .cdi real construido con esa toolchain.",
-      "rating": 4.0,
       "players": "1"
     },
     {
@@ -243,6 +237,20 @@
         "github-release://onixmanagerpro/RetroPlay@ps1games/Disney.s.Tarzan.USA.v1.1.Track.2.bin"
       ],
       "genre": "Plataformas",
+      "players": "2",
+      "year": 1999
+    },
+    {
+      "id": "ps1-007",
+      "name": "Metal Slug",
+      "console": "PS1",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786943163/images_2_phxc4b.jpg",
+      "file":[
+        "github-release://onixmanagerpro/RetroPlay@ps1games/Metal.Slug.X.USA.cue",
+        "github-release://onixmanagerpro/RetroPlay@ps1games/Metal.Slug.X.USA.bin"
+      ],
+      "genre": "Shooter",
       "players": "2",
       "year": 1999
     }
