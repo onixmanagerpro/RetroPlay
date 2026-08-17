@@ -226,21 +226,6 @@
       "year": 1999
     },
     {
-      "id": "ps1-006",
-      "name": "Tarzan",
-      "console": "PS1",
-      "type": "browser",
-      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786940234/images_xbwpk3.webp",
-      "file":[
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Disney.s.Tarzan.USA.v1.1.cue",
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Disney.s.Tarzan.USA.v1.1.Track.2.bin",
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Disney.s.Tarzan.USA.v1.1.Track.2.bin"
-      ],
-      "genre": "Plataformas",
-      "players": "2",
-      "year": 1999
-    },
-    {
       "id": "ps1-007",
       "name": "Metal Slug",
       "console": "PS1",
