@@ -177,16 +177,16 @@
     },
     {
       "id": "ps1-002",
-      "name": "Crash Team Racing",
+      "name": "Crash Bandicoot - Warped",
       "console": "PS1",
       "type": "browser",
-      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786837310/images_1_ztlhjk.webp",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786939048/Warped_Portada_1_r3sbyz.webp",
       "file":[
         "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.-.Warped.USA.cue",
         "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.-.Warped.USA.bin"
       ],
       "genre": "Carreras",
-      "players": "1",
+      "players": "2",
       "year": 1999
     }
   ]
