@@ -77,7 +77,8 @@ const CONSOLE_CORE_MAP = {
   'Nintendo 64': { core: 'n64', folder: 'emulators/n64' },
   'Dreamcast': { core: 'flycast', folder: 'emulators/dreamcast' },
   'PS1': { core: 'psx', folder: 'emulators/ps1' },
-  'GBA': { core: 'mgba', folder: 'emulators/gba' }
+  'GBA': { core: 'mgba', folder: 'emulators/gba' },
+  'PS2': { core: 'play', folder: 'emulators/ps2' }
 };
 
 const BOOT_MESSAGES = [
