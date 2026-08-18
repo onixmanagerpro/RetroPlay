@@ -128,12 +128,11 @@
       "console": "Nintendo 64",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786840351/super_mario_64-1683922_1_rj6wgg.webp",
-      "files": [
-        {
-          "id": "1ER_TM9aJT3QYywCM_MpGdQDycEhsNw-S",
-          "name": "Super Mario 64 (U) [!].z64"
-        }
-      ],
+      "file": {
+        "source": "google-drive",
+        "id": "1ER_TM9aJT3QYywCM_MpGdQDycEhsNw-S",
+        "name": "Super Mario 64 (U) [!].z64"
+      },
       "genre": "Plataformas",
       "players": "1",
       "year": 1997
@@ -144,12 +143,11 @@
       "console": "Nintendo 64",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786840597/Mario_Kart_64_iyueyb.webp",
-      "files": [
-        {
-          "id": "1YL-JucS_JCySsLayJfmqewq9NsQ2WvIL",
-          "name": "Mario Kart 64 (E) (V1.1) [!].z64"
-        }
-      ],
+      "file": {
+        "source": "google-drive",
+        "id": "1YL-JucS_JCySsLayJfmqewq9NsQ2WvIL",
+        "name": "Mario Kart 64 (E) (V1.1) [!].z64"
+      },
       "genre": "Plataformas",
       "players": "1",
       "year": 1997
