@@ -240,11 +240,20 @@
       "console": "PS1",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786943163/images_2_phxc4b.jpg",
-      "file":[
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Metal.Slug.X.USA.cue",
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Metal.Slug.X.USA.bin"
-      ],
-      "genre": "Shooter",
+      "file": {
+        "source": "google-drive",
+        "cue": {
+          "id": "116eJcspi1eroMp1-l_GzrD3CfGrINKly",
+          "name": "Metal.Slug.X.USA.cue"
+        },
+        "files": [
+          {
+            "id": "15gNVH63ysypxJwDo4HyCmkhJal4xKsFf",
+            "name": "Metal.Slug.X.USA.bin"
+          }
+        ]
+      },
+      "genre": "Carreras",
       "players": "2",
       "year": 1999
     }
