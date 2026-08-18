@@ -34,7 +34,13 @@ function buildGoogleDriveDownloadUrl(fileId) {
 }
 
 function normalizeCuePath(value) {
-  return String(value).replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+  return String(value)
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\s+\./g, '.')
+    .toLowerCase();
 }
 
 function readCueFileReferences(cueText) {
@@ -161,8 +167,10 @@ async function loadGoogleDriveGameFiles(fileField, { signal, onProgress } = {}) 
   const companionsToLoad = cueReferences.map((cueName) => {
     const entry = entriesByName.get(normalizeCuePath(cueName));
     if (!entry) {
+      const disponibles = fileEntries.map((entry) => `"${entry.name}"`).join(', ') || '(ninguna)';
       throw new Error(
-        `El .cue referencia "${cueName}", pero no existe una entrada con ese nombre en files.`
+        `El .cue referencia "${cueName}", pero no existe una entrada con ese nombre en files. ` +
+        `Nombres disponibles en el catálogo: ${disponibles}.`
       );
     }
     // mountedName es el texto exacto del CUE, no una versión normalizada.
