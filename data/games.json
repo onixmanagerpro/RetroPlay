@@ -216,7 +216,7 @@
       "console": "PS1",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786943163/images_2_phxc4b.jpg",
-      "file": { "source": "google-drive", "cue": { "id": "116eJcspi1eroMp1-l_GzrD3CfGrINKly", "name": "MetalSlug.cue" }, "files": [{ "id": "15gNVH63ysypxJwDo4HyCmkhJal4xKsFf", "name": "MetalSlug.bin" }] },
+      "file": { "source": "google-drive", "cue": { "id": "116eJcspi1eroMp1-l_GzrD3CfGrINKly", "name": "Metal Slug X (USA).cue" }, "files": [{ "id": "15gNVH63ysypxJwDo4HyCmkhJal4xKsFf", "name": "Metal Slug X (USA).bin" }] },
       "genre": "Shooter",
       "players": "2",
       "year": 1999
