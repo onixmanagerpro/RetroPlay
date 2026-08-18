@@ -6,4 +6,4 @@
  * Google Drive API. Sustituye el texto vacío por una clave NUEVA (la que se
  * compartió en el chat debe revocarse).
  */
-window.RETROPLAY_GOOGLE_DRIVE_API_KEY = 'AIzaSyBHa0ti-Rr-gShpABX9t_8G8ueXRR6xCVQ';
+window.RETROPLAY_GOOGLE_DRIVE_API_KEY = '';
