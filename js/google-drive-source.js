@@ -7,7 +7,7 @@
  */
 
 const GOOGLE_DRIVE_SOURCE = 'google-drive';
-const GOOGLE_DRIVE_DOWNLOAD_ORIGIN = 'https://drive.usercontent.google.com/download';
+const GOOGLE_DRIVE_API_ORIGIN = 'https://www.googleapis.com/drive/v3/files';
 
 function isGoogleDriveGameSource(fileField) {
   return !!fileField &&
@@ -21,12 +21,15 @@ function buildGoogleDriveDownloadUrl(fileId) {
     throw new Error('Falta el identificador de un archivo de Google Drive.');
   }
 
-  const params = new URLSearchParams({
-    id: fileId.trim(),
-    export: 'download',
-    confirm: 't'
-  });
-  return `${GOOGLE_DRIVE_DOWNLOAD_ORIGIN}?${params.toString()}`;
+  const apiKey = String(window.RETROPLAY_GOOGLE_DRIVE_API_KEY || '').trim();
+  if (!apiKey) {
+    throw new Error(
+      'Falta configurar la clave de Google Drive. Añádela en js/google-drive-config.js.'
+    );
+  }
+
+  const params = new URLSearchParams({ alt: 'media', key: apiKey });
+  return `${GOOGLE_DRIVE_API_ORIGIN}/${encodeURIComponent(fileId.trim())}?${params.toString()}`;
 }
 
 function normalizeCuePath(value) {
@@ -74,7 +77,7 @@ async function fetchGoogleDriveBlob(entry, { signal } = {}) {
     if (error?.name === 'AbortError') throw error;
     throw new Error(
       `No se pudo obtener "${entry.name}" directamente desde Google Drive. ` +
-      'Comprueba que el archivo esté compartido para descarga y que Drive permita CORS para este enlace.'
+      'Comprueba que el archivo sea público y que la clave esté restringida a este sitio y a Google Drive API.'
     );
   }
 
