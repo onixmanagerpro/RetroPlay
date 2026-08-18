@@ -58,17 +58,12 @@
  * -----------------------------------------------------------------------
  */
 
-const GDRIVE_SCHEME = 'google-drive://';
+// URL base del proxy de assets (Deno Deploy). No consume cuota de Vercel:
+// las descargas pesadas (ROMs/discos) pasan por aquí en vez de por
+// funciones de Vercel. Debe quedar IDÉNTICA a la de github-release-source.js.
+const ASSET_PROXY_BASE = 'https://CAMBIA-ESTO.deno.dev';
 
-/**
- * Base del proxy CORS. Antes era una ruta relativa ("/api/google-drive-asset",
- * función de Vercel); ahora apunta al Worker de Cloudflare (ver
- * cloudflare-worker/index.js) para que los bytes de los juegos no
- * cuenten contra Fast Data Transfer / Fast Origin Transfer de Vercel.
- * Debe ser EXACTAMENTE la misma URL que en js/github-release-source.js
- * (es el mismo Worker, dos rutas distintas dentro de él).
- */
-const ASSET_PROXY_BASE = 'https://retroplay-proxy.CAMBIA-ESTO.workers.dev';
+const GDRIVE_SCHEME = 'google-drive://';
 
 function isGoogleDriveRef(fileField) {
   return typeof fileField === 'string' && fileField.startsWith(GDRIVE_SCHEME);
