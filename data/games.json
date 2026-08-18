@@ -226,10 +226,19 @@
       "console": "PS1",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786942320/images_1_o9hkuz.webp",
-      "file":[
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Spider-Man.USA.cue",
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Spider-Man.USA.bin"
-      ],
+      "file": {
+        "source": "google-drive",
+        "cue": {
+          "id": "1ufJm9ufLdTZ-agToMHRK_1pe2AZsvIvu",
+          "name": "Spider-Man.USA.cue"
+        },
+        "files": [
+          {
+            "id": "1VLx-cU2Jxdz9xTXZe3SgZicIASJpP8Uy",
+            "name": "Spider - Man (USA).bin"
+          }
+        ]
+      },
       "genre": "Plataformas",
       "players": "1",
       "year": 1999
