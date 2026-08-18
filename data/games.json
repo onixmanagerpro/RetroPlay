@@ -370,6 +370,33 @@
       "genre": "Plataformas",
       "players": "1",
       "year": 1999
+    },
+    {
+      "id": "ps1-008",
+      "name": "Resident Evil 2",
+      "console": "PS1",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1787090547/images_vxtib7.webp",
+      "file": {
+        "source": "google-drive",
+        "cue": {
+          "id": "1CXmEq6Ctjiu9Ehk9BQ89P_X9EsHivAka",
+          "name": "Resident Evil 2 (USA) (Disc 2).cue"
+        },
+        "files": [
+          {
+            "id": "1Pm02gAAfRHNHkwBGEO4-KNKF-CN88lMN",
+            "name": "Resident Evil 2 (USA) (Disc 2) (Track 1).bin"
+          },
+          {
+            "id": "15r8dMmV6mEFdcAjU-H46ILcNhWmHhln1",
+            "name": "Resident Evil 2 (USA) (Disc 2) (Track 2).bin"
+          }
+        ]
+      },
+      "genre": "Plataformas",
+      "players": "1",
+      "year": 1999
     }
   ]
 }
