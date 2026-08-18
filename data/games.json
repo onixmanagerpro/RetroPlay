@@ -145,10 +145,16 @@
       "console": "Nintendo 64",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786840597/Mario_Kart_64_iyueyb.webp",
-      "file": "/games/n64/Mario Kart 64 (E) (V1.1) [!].z64",
-      "genre": "Carreras",
+      "files": [
+          {
+            "id": "1YL-JucS_JCySsLayJfmqewq9NsQ2WvIL",
+            "name": "Mario Kart 64 (E) (V1.1) [!].z64"
+          }
+        ]
+      },
+      "genre": "Plataformas",
       "players": "1",
-      "year": 1996
+      "year": 1997
     },
     {
       "id": "dreamcast-001",
