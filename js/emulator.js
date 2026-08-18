@@ -422,6 +422,92 @@ class EmulatorController {
     }
   }
 
+  /**
+   * BUG DEL VENDOR: el <div> del gamepad virtual táctil de EmulatorJS
+   * nace oculto (display:none implícito, nunca se le pone display=''
+   * en el constructor) y solo hay DOS caminos en todo emulator.min.js
+   * que lo hacen visible:
+   *
+   *   1) El toggle "Virtual Gamepad" del menú de ajustes
+   *      (menuOptionChanged -> handleSpecialOptions -> toggleVirtualGamepad),
+   *      que además se auto-dispara UNA VEZ al construirse el propio
+   *      menú (para reflejar el valor guardado/por defecto). Pero ese
+   *      auto-disparo ocurre en el constructor del reproductor -- SÍNCRONO,
+   *      antes de downloadFiles()/initializeGameManager() -- y
+   *      menuOptionChanged está guardado por "this.gameManager &&", así
+   *      que con gameManager todavía undefined la llamada se descarta
+   *      en silencio. No hay ningún reintento posterior: initializeGameManager()
+   *      no vuelve a tocar el menú de ajustes.
+   *
+   *   2) startGame() (que sí corre después de que gameManager exista)
+   *      tiene "this.touch && (this.virtualGamepad.style.display = '')".
+   *      Pero this.touch (distinto de this.isMobile/this.hasTouchScreen)
+   *      arranca en false y SOLO se pone a true por un evento táctil
+   *      real sobre el botón de inicio NATIVO de EmulatorJS. RetroPlay
+   *      fija EJS_startOnLoaded=true (ver más abajo), así que ese botón
+   *      nunca se muestra ni se toca -- this.touch se queda en false
+   *      para siempre, en TODAS las consolas.
+   *
+   * Con las dos vías inutilizadas, el gamepad depende de pura suerte de
+   * timing: en cores pequeños (SNES) el usuario a veces ya tocó la
+   * pantalla o el menú ya se reconstruyó por algún otro motivo antes de
+   * fijarse, así que a veces no se nota. En PS1, con EJS_externalFiles
+   * pesados y descargas de minutos, la ventana es enorme y el div se
+   * queda en display:none de forma consistente.
+   *
+   * EL FIX vive aquí, en código propio de RetroPlay, no en el vendor
+   * GPL de terceros (que además está minificado y se perdería en
+   * cualquier actualización de /vendor/emulatorjs): en cuanto
+   * EJS_onGameStart confirma que gameManager ya existe, se fuerza la
+   * sincronización directamente contra la instancia usando su API
+   * pública y estable (toggleVirtualGamepad, preGetSetting) -- sin
+   * tocar this.touch ni el display interno a mano, y sin parchear
+   * emulator.min.js.
+   *
+   * Se respeta la preferencia real del usuario si la guardó alguna vez
+   * (preGetSetting lee de localStorage vía la propia API del
+   * reproductor); si nunca la tocó, se usa el mismo criterio por
+   * defecto que ya usa el vendor para decidir el valor inicial del
+   * menú (isMobile ? "enabled" : "disabled", ver el bloque de ajustes
+   * "Virtual Gamepad" en emulator.min.js), para que lo que se ve en
+   * pantalla coincida con lo que el propio menú de ajustes muestra
+   * seleccionado.
+   */
+  _syncVirtualGamepad(instance) {
+    try {
+      if (!instance || typeof instance.toggleVirtualGamepad !== 'function') return;
+
+      const saved = typeof instance.preGetSetting === 'function'
+        ? instance.preGetSetting('virtual-gamepad')
+        : null;
+      const shouldShow = saved
+        ? saved !== 'disabled'
+        : !!instance.isMobile;
+
+      instance.toggleVirtualGamepad(shouldShow);
+
+      // El propio menú de ajustes queda con el checkbox tal como estaba
+      // en el momento en que se construyó (posiblemente desincronizado
+      // del valor real que acabamos de aplicar arriba, por el mismo
+      // guard de gameManager). allSettings sí se actualiza siempre
+      // (menuOptionChanged lo hace ANTES del guard), así que forzamos
+      // también gameManager.setVariable para que el core reciba el
+      // valor, igual que habría pasado si el guard no hubiese bloqueado
+      // la llamada original.
+      if (instance.gameManager && typeof instance.gameManager.setVariable === 'function') {
+        instance.gameManager.setVariable('virtual-gamepad', shouldShow ? 'enabled' : 'disabled');
+      }
+      if (instance.allSettings) {
+        instance.allSettings['virtual-gamepad'] = shouldShow ? 'enabled' : 'disabled';
+      }
+    } catch (err) {
+      // Nunca debe romper el arranque del juego por esto -- en el peor
+      // caso el gamepad se queda como estaba (comportamiento previo),
+      // no algo peor.
+      console.warn('[emulator] No se pudo sincronizar el gamepad virtual táctil', err);
+    }
+  }
+
   _runBootSequence(onBootMessage) {
     let i = 0;
     onBootMessage?.(BOOT_MESSAGES[0]);
