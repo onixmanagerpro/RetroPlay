@@ -1,7 +1,7 @@
 {
   
-  "version": 2,
-  "updated": "2026-08-14",
+  "version": 3,
+  "updated": "2026-08-18",
   "note": "Catalogo de EJEMPLO. Las entradas marcadas con verified:true han sido contrastadas con fuentes publicas (ver 'source' en cada una); el resto son placeholders genericos sin atribucion de autoria especifica, pensados unicamente para probar el flujo tecnico de la plataforma (ficha, emulador, descarga). Sustituye cualquier entrada por contenido real del que tengas derecho de uso antes de un despliegue publico.",
   "games": [
     {
@@ -189,10 +189,19 @@
       "console": "PS1",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786939048/Warped_Portada_1_r3sbyz.webp",
-      "file":[
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.-.Warped.USA.cue",
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.-.Warped.USA.bin"
-      ],
+      "file": {
+        "source": "google-drive",
+        "cue": {
+          "id": "1LI3IsGfptqIy4zT5wkp_WGu1T07xogoi",
+          "name": "Crash.Bandicoot.-.Warped.USA.cue"
+        },
+        "files": [
+          {
+            "id": "1GdTXTijIamRXyMpZU-V5-F_lbAd_6tkO",
+            "name": "Crash Bandicoot - Warped (USA).bin"
+          }
+        ]
+      },
       "genre": "Carreras",
       "players": "2",
       "year": 1999
