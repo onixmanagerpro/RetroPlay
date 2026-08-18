@@ -18,7 +18,7 @@
       "players": "1",
       "year": 1997
     },
-     {
+    {
       "id": "snes-002",
       "name": "Super Mario World 2 - Yoshi's Island",
       "console": "SNES",
@@ -54,7 +54,7 @@
       "console": "SNES",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786785483/mariokartsnes_1_tmjlvl.webp",
-       "file": {
+      "file": {
         "source": "google-drive",
         "id": "1YL-JucS_JCySsLayJfmqewq9NsQ2WvIL",
         "name": "Mario Kart 64 (E) (V1.1) [!].z64"
@@ -338,6 +338,7 @@
             "id": "1nJ2jNNvbKXekMj8Wn8drLwd_G23k8UJK",
             "name": "Metal Slug X (USA).bin"
           }
+        ]
       },
       "genre": "Accion",
       "players": "2",
@@ -348,24 +349,28 @@
       "name": "Tarzan",
       "console": "PS1",
       "type": "browser",
-      "cover": "",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786940234/images_xbwpk3.webp",
       "file": {
         "source": "google-drive",
         "cue": {
-          "id": "1ufJm9ufLdTZ-agToMHRK_1pe2AZsvIvu",
-          "name": "Spider-Man.USA.cue"
+          "id": "1MYRcdaOQ3BKp9zxHLOOjVR6hgV1ERP75",
+          "name": "Disney's Tarzan (USA) (v1.1).cue"
         },
         "files": [
           {
-            "id": "12MGCiq9N1l0YmWb5nQBS6EN9eMxf8Mc5",
-            "name": "Spider-Man (USA).bin"
-          }
+            "id": "1fw3rWaHEIZ9Qq3uRd1jaqhk9NZD2KQrD",
+            "name": "Disney's Tarzan (USA) (v1.1) (Track 1).bin"
+          },
+          {
+            "id": "1WIUfh4Qk1k-uV0t6dUOAjfpBPXpimJJU",
+            "name": "Disney's Tarzan (USA) (v1.1) (Track 1).bin"
+          },
+          
         ]
       },
       "genre": "Plataformas",
       "players": "1",
       "year": 1999
-    },
-     ]
+    }
   ]
 }
