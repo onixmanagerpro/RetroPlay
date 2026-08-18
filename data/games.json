@@ -1,5 +1,4 @@
 {
-  
   "version": 3,
   "updated": "2026-08-18",
   "note": "Catalogo de EJEMPLO. Las entradas marcadas con verified:true han sido contrastadas con fuentes publicas (ver 'source' en cada una); el resto son placeholders genericos sin atribucion de autoria especifica, pensados unicamente para probar el flujo tecnico de la plataforma (ficha, emulador, descarga). Sustituye cualquier entrada por contenido real del que tengas derecho de uso antes de un despliegue publico.",
@@ -197,6 +196,10 @@
           }
         ]
       },
+      "genre": "Plataformas",
+      "players": "1",
+      "year": 1997
+    },
     {
       "id": "ps1-003",
       "name": "Crash Bandicoot - Warped",
@@ -216,9 +219,9 @@
           }
         ]
       },
-      "genre": "Carreras",
-      "players": "2",
-      "year": 1999
+      "genre": "Plataformas",
+      "players": "1",
+      "year": 1998
     },
     {
       "id": "ps1-004",
@@ -239,7 +242,7 @@
           }
         ]
       },
-      "genre": "Plataformas",
+      "genre": "Carreras",
       "players": "1",
       "year": 1999
     },
@@ -285,10 +288,9 @@
           }
         ]
       },
-      "genre": "Carreras",
+      "genre": "Accion",
       "players": "2",
       "year": 1999
     }
-    
   ]
 }
