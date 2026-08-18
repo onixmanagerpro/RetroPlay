@@ -60,6 +60,16 @@
 
 const GDRIVE_SCHEME = 'google-drive://';
 
+/**
+ * Base del proxy CORS. Antes era una ruta relativa ("/api/google-drive-asset",
+ * función de Vercel); ahora apunta al Worker de Cloudflare (ver
+ * cloudflare-worker/index.js) para que los bytes de los juegos no
+ * cuenten contra Fast Data Transfer / Fast Origin Transfer de Vercel.
+ * Debe ser EXACTAMENTE la misma URL que en js/github-release-source.js
+ * (es el mismo Worker, dos rutas distintas dentro de él).
+ */
+const ASSET_PROXY_BASE = 'https://retroplay-proxy.CAMBIA-ESTO.workers.dev';
+
 function isGoogleDriveRef(fileField) {
   return typeof fileField === 'string' && fileField.startsWith(GDRIVE_SCHEME);
 }
@@ -99,7 +109,7 @@ function parseGoogleDriveRef(fileField) {
  */
 function buildDriveProxyUrl(id, name) {
   const params = new URLSearchParams({ id, name });
-  return `/api/google-drive-asset?${params.toString()}`;
+  return `${ASSET_PROXY_BASE}/google-drive-asset?${params.toString()}`;
 }
 
 /**
