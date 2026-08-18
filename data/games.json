@@ -5,28 +5,51 @@
   "games": [
     {
       "id": "snes-001",
-      "name": "Donkey Kong",
-      "console": "SNES",
-      "type": "browser",
-      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786787147/dk_1_putrdr.webp",
-      "file": "/games/snes/Donkey Kong Country (U) (V1.2) [!].smc",
-      "genre": "Plataformas",
-      "players": "2",
-      "year": 1994
-    },
-    {
-      "id": "snes-002",
       "name": "Mario World",
       "console": "SNES",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786788025/smw_il8qh7.webp",
-      "file": "/games/snes/Super Mario World (V1.0) (E).smc",
+      "file": {
+        "source": "google-drive",
+        "id": "1zIVq1JBgd7h6vtosB8MIPye6SJzD7slG",
+        "name": "Super Mario World (V1.0) (E).smc"
+      },
       "genre": "Plataformas",
-      "players": "2",
-      "year": 1990
+      "players": "1",
+      "year": 1997
+    },
+     {
+      "id": "snes-002",
+      "name": "Super Mario World 2 - Yoshi's Island",
+      "console": "SNES",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786794474/images_1_ggp2my.webp",
+      "file": {
+        "source": "google-drive",
+        "id": "1XFl4HTqU3oZedMdVIFK1mgLAsZ3u8JCp",
+        "name": "Super Mario World 2 - Yoshi's Island (U) (V1.1).smc"
+      },
+      "genre": "Plataformas",
+      "players": "1",
+      "year": 1999
     },
     {
       "id": "snes-003",
+      "name": "Donkey Kong",
+      "console": "SNES",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786787147/dk_1_putrdr.webp",
+      "file": {
+        "source": "google-drive",
+        "id": "1b7RkYa9Bsg_AFJPr4WCX0vqULvGw-rYB",
+        "name": "Donkey Kong Country (U) (V1.2) [!].smc"
+      },
+      "genre": "Plataformas",
+      "players": "1",
+      "year": 1999
+    },
+    {
+      "id": "snes-004",
       "name": "Mario Kart",
       "console": "SNES",
       "type": "browser",
@@ -37,7 +60,7 @@
       "year": 1992
     },
     {
-      "id": "snes-004",
+      "id": "snes-005",
       "name": "Mario all-stars",
       "console": "SNES",
       "type": "browser",
@@ -48,7 +71,7 @@
       "year": 1993
     },
     {
-      "id": "snes-005",
+      "id": "snes-006",
       "name": "Dragon Ball Z Budokai 3",
       "console": "SNES",
       "type": "browser",
@@ -59,7 +82,7 @@
       "year": 1994
     },
     {
-      "id": "snes-006",
+      "id": "snes-007",
       "name": "Aladin",
       "console": "SNES",
       "type": "browser",
@@ -70,17 +93,6 @@
         "name": "Aladdin (U) [!].smc"
       },
       "genre": "Plataformas",
-      "players": "1",
-      "year": 1997
-    },
-    {
-      "id": "snes-007",
-      "name": "Yoshi's Island",
-      "console": "SNES",
-      "type": "browser",
-      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786794474/images_1_ggp2my.webp",
-      "file": "/games/snes/Super Mario World 2 - Yoshi's Island (U) (V1.1).smc",
-      "genre": "plataformas",
       "players": "1",
       "year": 1995
     },
