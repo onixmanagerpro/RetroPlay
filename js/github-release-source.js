@@ -65,6 +65,18 @@
 const GITHUB_RELEASE_SCHEME = 'github-release://';
 
 /**
+ * Base del proxy CORS. Antes era una ruta relativa ("/api/github-asset",
+ * función de Vercel); ahora apunta al Worker de Cloudflare (ver
+ * cloudflare-worker/index.js) para que los bytes de los juegos no
+ * cuenten contra Fast Data Transfer / Fast Origin Transfer de Vercel.
+ *
+ * Sustituye esta URL por la que te imprime `wrangler deploy` tras
+ * desplegar cloudflare-worker/ (o por tu dominio propio si le pones uno
+ * al Worker desde el dashboard de Cloudflare).
+ */
+const ASSET_PROXY_BASE = 'https://retroplay-proxy.CAMBIA-ESTO.workers.dev';
+
+/**
  * Cache en memoria de la respuesta de la API por "owner/repo@tag", para
  * no repetir la consulta si el usuario reintenta cargar el mismo juego
  * varias veces seguidas en la misma sesión (la API de GitHub sin
@@ -185,18 +197,18 @@ async function resolveGithubReleaseAsset(fileField) {
 }
 
 /**
- * Construye la URL del proxy propio (api/github-asset.js) para un asset
- * de GitHub Release, en vez de devolver su browser_download_url tal
- * cual. Es NECESARIO: GitHub no manda cabeceras CORS en la descarga de
- * assets de Releases (ni en el redirect ni en el storage final), así
- * que un fetch() desde el navegador a esa URL SIEMPRE falla con
- * "blocked by CORS policy" -- no importa si el archivo existe y la URL
- * es exacta, el navegador ni siquiera deja leer la respuesta. Ver el
- * comentario completo en api/github-asset.js.
+ * Construye la URL del proxy CORS (cloudflare-worker/index.js, ruta
+ * /github-asset) para un asset de GitHub Release, en vez de devolver su
+ * browser_download_url tal cual. Es NECESARIO: GitHub no manda cabeceras
+ * CORS en la descarga de assets de Releases (ni en el redirect ni en el
+ * storage final), así que un fetch() desde el navegador a esa URL
+ * SIEMPRE falla con "blocked by CORS policy" -- no importa si el archivo
+ * existe y la URL es exacta, el navegador ni siquiera deja leer la
+ * respuesta. Ver el comentario completo en cloudflare-worker/index.js.
  */
 function buildAssetProxyUrl(asset) {
   const params = new URLSearchParams({ url: asset.browser_download_url, name: asset.name });
-  return `/api/github-asset?${params.toString()}`;
+  return `${ASSET_PROXY_BASE}/github-asset?${params.toString()}`;
 }
 
 /**
