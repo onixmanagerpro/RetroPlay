@@ -1,141 +1,168 @@
 /**
- * google-drive-source.js
- * -----------------------------------------------------------------------
- * Resolver de archivos alojados en Google Drive.
+ * Cargador directo de archivos públicos de Google Drive.
  *
- * POR QUÉ EXISTE ESTE ARCHIVO
- * -----------------------------------------------------------------------
- * game.file puede apuntar a un archivo guardado en Google Drive en vez
- * de a /games/... local o a un asset de GitHub Releases. Igual que pasa
- * con GitHub (ver js/github-release-source.js), la URL de descarga de
- * Drive NO es un simple enlace fijo a partir del ID del archivo:
- *
- *   - Para archivos PEQUEÑOS, Drive permite descarga directa vía
- *     https://drive.google.com/uc?export=download&id={ID}
- *
- *   - Para archivos GRANDES (como un .bin de PS1/PS2 de cientos de MB,
- *     que es justo el caso de uso aquí), Drive intercala una página de
- *     confirmación ("Google Drive no puede escanear este archivo en
- *     busca de virus") con un token que cambia en cada descarga y que
- *     hay que extraer y reenviar. Un fetch() directo a la URL de arriba
- *     con un archivo grande NO devuelve el archivo: devuelve el HTML de
- *     esa página de aviso.
- *
- * Por eso este módulo NO resuelve nada en el navegador: reenvía la
- * petición a un endpoint propio (api/google-drive-asset.js) que hace
- * ese baile de confirmación en el servidor y devuelve los bytes reales
- * ya listos, con soporte de Range para que EmulatorJS pueda hacer
- * streaming/seek igual que con los archivos locales.
- *
- * FORMATO DE `game.file` QUE ESTE MÓDULO ENTIENDE
- * -----------------------------------------------------------------------
- *   google-drive://{ID_DEL_ARCHIVO}/{nombre-para-mostrar.ext}
- *
- * El ID es el que aparece en la URL para compartir de Drive:
- *   https://drive.google.com/file/d/EL_ID_VA_AQUI/view
- *                                    ^^^^^^^^^^^^
- * El {nombre-para-mostrar.ext} es obligatorio (a diferencia de GitHub,
- * la API pública de Drive no siempre expone el nombre original del
- * archivo sin credenciales) y debe coincidir con lo que un .cue interno
- * espera si el juego es multi-archivo.
- *
- * Ejemplo:
- *   "file": "google-drive://1AbCdEfGhIjKlMnOpQrStUvWxYz0123456/rockfall.smc"
- *
- * Ejemplo multi-archivo (.cue + .bin):
- *   "file": [
- *     "google-drive://1AAAA.../Juego.cue",
- *     "google-drive://1BBBB.../Juego.bin"
- *   ]
- *
- * El archivo en Drive DEBE tener permiso "Cualquier usuario con el
- * enlace: Lector" -- si es privado, el proxy del servidor no puede
- * leerlo (Drive devuelve 403/redirect a login) y la descarga falla con
- * un error claro en vez de colgarse en silencio.
- *
- * Cualquier game.file que NO empiece por "google-drive://" no se toca
- * aquí -- sigue funcionando igual que antes (local o github-release://).
- * -----------------------------------------------------------------------
+ * Los bytes se solicitan desde el navegador y nunca pasan por Vercel. Para
+ * juegos de PS1 se descarga primero el CUE, se leen sus líneas FILE y sólo se
+ * obtienen los BIN declarados en el manifiesto del catálogo.
  */
 
-// URL base del proxy de assets (Deno Deploy). No consume cuota de Vercel:
-// las descargas pesadas (ROMs/discos) pasan por aquí en vez de por
-// funciones de Vercel. Debe quedar IDÉNTICA a la de github-release-source.js.
-const ASSET_PROXY_BASE = 'https://retroplay.onixmanagerpro.deno.net';
+const GOOGLE_DRIVE_SOURCE = 'google-drive';
+const GOOGLE_DRIVE_DOWNLOAD_ORIGIN = 'https://drive.usercontent.google.com/download';
 
-const GDRIVE_SCHEME = 'google-drive://';
-
-function isGoogleDriveRef(fileField) {
-  return typeof fileField === 'string' && fileField.startsWith(GDRIVE_SCHEME);
+function isGoogleDriveGameSource(fileField) {
+  return !!fileField &&
+    !Array.isArray(fileField) &&
+    typeof fileField === 'object' &&
+    fileField.source === GOOGLE_DRIVE_SOURCE;
 }
 
-/**
- * Parsea "google-drive://ID/nombre.ext" en sus partes. Lanza un Error
- * descriptivo si falta el nombre, en vez de dejar que falle más tarde
- * con un mensaje críptico.
- */
-function parseGoogleDriveRef(fileField) {
-  const rest = fileField.slice(GDRIVE_SCHEME.length); // ID/nombre.ext
-  const slashIndex = rest.indexOf('/');
-  if (slashIndex === -1) {
+function buildGoogleDriveDownloadUrl(fileId) {
+  if (typeof fileId !== 'string' || !fileId.trim()) {
+    throw new Error('Falta el identificador de un archivo de Google Drive.');
+  }
+
+  const params = new URLSearchParams({
+    id: fileId.trim(),
+    export: 'download',
+    confirm: 't'
+  });
+  return `${GOOGLE_DRIVE_DOWNLOAD_ORIGIN}?${params.toString()}`;
+}
+
+function normalizeCuePath(value) {
+  return String(value).replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
+}
+
+function readCueFileReferences(cueText) {
+  const references = [];
+  // El primer grupo cubre nombres entre comillas (incluidos espacios); el
+  // segundo mantiene compatibilidad con CUE sin comillas.
+  const fileLine = /^\s*FILE\s+(?:"([^"]+)"|([^\s]+))\s+(?:BINARY|MOTOROLA|AIFF|WAVE|MP3)\b/gim;
+  let match;
+
+  while ((match = fileLine.exec(cueText)) !== null) {
+    const name = match[1] || match[2];
+    if (name && !references.includes(name)) references.push(name);
+  }
+
+  if (references.length === 0) {
+    throw new Error('El archivo .cue no contiene ninguna línea FILE compatible.');
+  }
+
+  return references;
+}
+
+function validateDriveEntry(entry, label) {
+  if (!entry || typeof entry.id !== 'string' || typeof entry.name !== 'string' || !entry.id || !entry.name) {
+    throw new Error(`La entrada ${label} de Google Drive debe incluir "id" y "name".`);
+  }
+  return { id: entry.id, name: entry.name };
+}
+
+async function fetchGoogleDriveBlob(entry, { signal } = {}) {
+  const url = buildGoogleDriveDownloadUrl(entry.id);
+  let response;
+
+  try {
+    response = await fetch(url, {
+      signal,
+      credentials: 'omit',
+      cache: 'no-store',
+      referrerPolicy: 'no-referrer'
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
     throw new Error(
-      `Referencia de Google Drive mal formada: "${fileField}". ` +
-      `Formato esperado: google-drive://ID_DEL_ARCHIVO/nombre.ext ` +
-      `(el nombre con extensión es obligatorio).`
+      `No se pudo obtener "${entry.name}" directamente desde Google Drive. ` +
+      'Comprueba que el archivo esté compartido para descarga y que Drive permita CORS para este enlace.'
     );
   }
-  const id = rest.slice(0, slashIndex);
-  const name = rest.slice(slashIndex + 1);
-  if (!id || !name) {
-    throw new Error(
-      `Referencia de Google Drive incompleta: "${fileField}". ` +
-      `Formato esperado: google-drive://ID_DEL_ARCHIVO/nombre.ext`
-    );
+
+  if (!response.ok) {
+    throw new Error(`Google Drive respondió HTTP ${response.status} al cargar "${entry.name}".`);
   }
-  return { id, name };
+
+  const blob = await response.blob();
+  if (blob.size === 0) {
+    throw new Error(`Google Drive devolvió "${entry.name}" vacío.`);
+  }
+
+  return {
+    name: entry.name,
+    blob,
+    size: blob.size,
+    mimeType: blob.type || 'application/octet-stream'
+  };
 }
 
 /**
- * Construye la URL del proxy propio (api/google-drive-asset.js) para un
- * archivo de Drive. Igual que con GitHub, no se usa la URL de Drive
- * directamente: hace falta el proxy para (a) resolver el token de
- * confirmación de archivos grandes en el servidor, y (b) añadir
- * cabeceras CORS que Drive no manda.
- */
-function buildDriveProxyUrl(id, name) {
-  const params = new URLSearchParams({ id, name });
-  return `${ASSET_PROXY_BASE}/google-drive-asset?${params.toString()}`;
-}
-
-/**
- * Punto de entrada equivalente a resolveGameFileUrl() de
- * github-release-source.js: dado game.file (local, github-release://...
- * o google-drive://...), devuelve la URL final lista para fetch().
- */
-function resolveGoogleDriveUrl(fileField) {
-  if (!isGoogleDriveRef(fileField)) return fileField;
-  const { id, name } = parseGoogleDriveRef(fileField);
-  return buildDriveProxyUrl(id, name);
-}
-
-/**
- * Resuelve una entrada individual (string) de game.file a { name, url,
- * size, ref }, con la misma forma que usa resolveGameFileEntries() en
- * github-release-source.js, para que ambas fuentes sean intercambiables
- * dentro de un mismo array multi-archivo.
+ * Descarga en memoria un juego definido así:
  *
- * size siempre es null aquí: el tamaño real solo se conoce tras pedirle
- * los metadatos a la API de Drive, y eso implica una petición extra por
- * archivo antes de empezar a descargar nada. Como emulator.js ya trata
- * size === null como "desconocido, usa timeout genérico" (igual que con
- * los archivos locales), no merece la pena esa petición extra solo para
- * rellenar el dato.
+ * {
+ *   source: 'google-drive',
+ *   cue: { id: '...', name: 'Juego.cue' },
+ *   files: [{ id: '...', name: 'Nombre literal que referencia el CUE.bin' }]
+ * }
  */
-function resolveGoogleDriveEntry(fileField) {
-  const { id, name } = parseGoogleDriveRef(fileField);
-  return { name, url: buildDriveProxyUrl(id, name), size: null, ref: fileField };
+async function loadGoogleDriveGameFiles(fileField, { signal, onProgress } = {}) {
+  if (!isGoogleDriveGameSource(fileField)) {
+    throw new Error('La fuente del juego no es una configuración de Google Drive válida.');
+  }
+
+  const cueEntry = validateDriveEntry(fileField.cue, 'cue');
+  const fileEntries = Array.isArray(fileField.files)
+    ? fileField.files.map((entry, index) => validateDriveEntry(entry, `files[${index}]`))
+    : [];
+
+  onProgress?.('Obteniendo el archivo .cue desde Google Drive…');
+  const main = await fetchGoogleDriveBlob(cueEntry, { signal });
+  const cueText = await main.blob.text();
+  const cueReferences = readCueFileReferences(cueText);
+
+  const entriesByName = new Map();
+  for (const entry of fileEntries) {
+    const key = normalizeCuePath(entry.name);
+    if (entriesByName.has(key)) {
+      throw new Error(`Hay dos archivos de Google Drive con el mismo nombre: "${entry.name}".`);
+    }
+    entriesByName.set(key, entry);
+  }
+
+  const companionsToLoad = cueReferences.map((cueName) => {
+    const entry = entriesByName.get(normalizeCuePath(cueName));
+    if (!entry) {
+      throw new Error(
+        `El .cue referencia "${cueName}", pero no existe una entrada con ese nombre en files.`
+      );
+    }
+    // mountedName es el texto exacto del CUE, no una versión normalizada.
+    return { ...entry, mountedName: cueName };
+  });
+
+  const companions = [];
+  for (let index = 0; index < companionsToLoad.length; index++) {
+    const entry = companionsToLoad[index];
+    onProgress?.(`Cargando archivo ${index + 1} de ${companionsToLoad.length}: ${entry.name}…`);
+    const file = await fetchGoogleDriveBlob(entry, { signal });
+    companions.push({ ...file, mountedName: entry.mountedName });
+  }
+
+  const assets = {
+    main,
+    companions,
+    totalBytes: main.size + companions.reduce((sum, entry) => sum + entry.size, 0),
+    release() {
+      // Las URLs blob y el File del iframe siguen siendo responsables de los
+      // bytes que el emulador está usando. Aquí se eliminan sólo referencias
+      // de este cargador cuando ya no hacen falta.
+      this.main.blob = null;
+      this.companions.forEach((entry) => { entry.blob = null; });
+      this.companions.length = 0;
+    }
+  };
+
+  return assets;
 }
 
-window.isGoogleDriveRef = isGoogleDriveRef;
-window.resolveGoogleDriveUrl = resolveGoogleDriveUrl;
-window.resolveGoogleDriveEntry = resolveGoogleDriveEntry;
+window.isGoogleDriveGameSource = isGoogleDriveGameSource;
+window.loadGoogleDriveGameFiles = loadGoogleDriveGameFiles;

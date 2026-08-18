@@ -62,11 +62,6 @@
  * -----------------------------------------------------------------------
  */
 
-// URL base del proxy de assets (Deno Deploy). No consume cuota de Vercel:
-// las descargas pesadas (ROMs/discos) pasan por aquí en vez de por
-// funciones de Vercel. Debe quedar IDÉNTICA a la de google-drive-source.js.
-const ASSET_PROXY_BASE = 'https://retroplay.onixmanagerpro.deno.net';
-
 const GITHUB_RELEASE_SCHEME = 'github-release://';
 
 /**
@@ -201,7 +196,7 @@ async function resolveGithubReleaseAsset(fileField) {
  */
 function buildAssetProxyUrl(asset) {
   const params = new URLSearchParams({ url: asset.browser_download_url, name: asset.name });
-  return `${ASSET_PROXY_BASE}/github-asset?${params.toString()}`;
+  return `/api/github-asset?${params.toString()}`;
 }
 
 /**
@@ -211,9 +206,6 @@ function buildAssetProxyUrl(asset) {
  * el esquema github-release://, se devuelve tal cual sin tocar nada.
  */
 async function resolveGameFileUrl(fileField) {
-  if (window.isGoogleDriveRef && window.isGoogleDriveRef(fileField)) {
-    return window.resolveGoogleDriveUrl(fileField);
-  }
   if (!isGithubReleaseRef(fileField)) return fileField;
   const asset = await resolveGithubReleaseAsset(fileField);
   return buildAssetProxyUrl(asset);
@@ -257,13 +249,6 @@ async function resolveGameFileUrl(fileField) {
 async function resolveGameFileEntries(fileField) {
   const list = Array.isArray(fileField) ? fileField : [fileField];
   return Promise.all(list.map(async (ref) => {
-    // google-drive://... se resuelve en js/google-drive-source.js. Se
-    // comprueba primero porque es una comprobación de string barata y
-    // deja isGithubReleaseRef/el resto del flujo intactos para todo lo
-    // que no sea una referencia de Drive.
-    if (window.isGoogleDriveRef && window.isGoogleDriveRef(ref)) {
-      return window.resolveGoogleDriveEntry(ref);
-    }
     if (isGithubReleaseRef(ref)) {
       // El nombre real viene del propio asset reportado por la API de
       // GitHub (resolveGithubReleaseAsset), NO de la URL final: la URL
@@ -286,61 +271,6 @@ async function resolveGameFileEntries(fileField) {
   }));
 }
 
-/**
- * DESCARGA CON PROGRESO REAL -- por qué existe esta función
- * -----------------------------------------------------------------------
- * Los juegos de PS1 (.bin/.cue) pesan habitualmente cientos de MB, así
- * que la descarga tarda de verdad y NO es aceptable dejar a la persona
- * mirando un spinner sin saber si algo se está moviendo o si se quedó
- * colgado. fetch() normal no expone progreso -- solo la promesa resuelta
- * al final -- así que aquí leemos el body como stream con
- * response.body.getReader() y vamos acumulando bytes nosotros mismos,
- * igual que hace EmulatorJS internamente para sus propias descargas.
- *
- * Devuelve un Blob con los bytes completos (no un ArrayBuffer) porque el
- * llamador lo va a convertir en un blob: URL vía URL.createObjectURL,
- * que es lo que se le pasa a EJS_gameUrl / EJS_externalFiles para que
- * EmulatorJS monte el archivo sin tener que re-descargarlo.
- *
- * `onProgress(loadedBytes, totalBytes)` se llama en cada chunk recibido.
- * `totalBytes` puede ser null si el servidor no informó Content-Length
- * (pasa con algunos archivos locales servidos sin esa cabecera) -- en
- * ese caso el llamador debe caer a un indicador indeterminado.
- */
-async function fetchWithProgress(url, onProgress) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} al descargar ${url}`);
-  }
-
-  const contentLengthHeader = response.headers.get('content-length');
-  const totalBytes = contentLengthHeader ? parseInt(contentLengthHeader, 10) : null;
-
-  // Si el navegador no expone un stream legible (muy improbable hoy en
-  // día, pero por si acaso) caemos a un blob() normal sin progreso
-  // incremental -- sigue funcionando, solo sin barra granular.
-  if (!response.body || !response.body.getReader) {
-    const blob = await response.blob();
-    onProgress?.(blob.size, totalBytes ?? blob.size);
-    return blob;
-  }
-
-  const reader = response.body.getReader();
-  const chunks = [];
-  let loadedBytes = 0;
-
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    loadedBytes += value.length;
-    onProgress?.(loadedBytes, totalBytes);
-  }
-
-  return new Blob(chunks);
-}
-
 window.isGithubReleaseRef = isGithubReleaseRef;
 window.resolveGameFileUrl = resolveGameFileUrl;
 window.resolveGameFileEntries = resolveGameFileEntries;
-window.fetchWithProgress = fetchWithProgress;

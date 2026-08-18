@@ -373,21 +373,11 @@ function closeGameModal() {
 // ===========================================================================
 // EMULADOR
 // ===========================================================================
-function formatMB(bytes) {
-  return (bytes / (1024 * 1024)).toFixed(1);
-}
-
 async function launchGame(game) {
   const view = document.getElementById('emulator-view');
   const host = document.getElementById('emulator-canvas-host');
   const bootScreen = document.getElementById('emulator-boot-screen');
   const bootLog = document.getElementById('emulator-boot-log');
-  const bootSpinner = document.getElementById('emulator-boot-spinner');
-  const downloadProgress = document.getElementById('emulator-download-progress');
-  const downloadTrack = downloadProgress.querySelector('.emulator-download-track');
-  const downloadFill = document.getElementById('emulator-download-fill');
-  const downloadPercent = document.getElementById('emulator-download-percent');
-  const downloadBytes = document.getElementById('emulator-download-bytes');
 
   document.getElementById('emulator-game-name').textContent = game.name;
   document.getElementById('emulator-console-name').textContent = game.console;
@@ -401,53 +391,14 @@ async function launchGame(game) {
   view.classList.add('is-open');
   view.setAttribute('aria-hidden', 'false');
 
-  // Mientras se descarga el archivo del juego (fase que puede tardar
-  // bastante en PS1, con discos de cientos de MB) mostramos la barra de
-  // progreso y ocultamos el spinner de arranque; en cuanto termina la
-  // descarga, se invierte: se oculta la barra y aparece el spinner con
-  // los mensajes rotativos de "arrancando el núcleo".
-  downloadProgress.style.display = 'flex';
-  bootSpinner.style.display = 'none';
-  downloadFill.style.width = '0%';
-  downloadTrack.classList.remove('is-indeterminate');
-  downloadPercent.textContent = '0%';
-  downloadBytes.textContent = '';
-  bootLog.textContent = 'Descargando el juego…';
-
   await emulatorController.launch(game, host, {
-    onDownloadProgress: ({ loadedBytes, totalBytes, fileIndex, fileCount, done }) => {
-      if (done) {
-        downloadProgress.style.display = 'none';
-        bootSpinner.style.display = '';
-        return;
-      }
-      const multiFile = fileCount > 1 ? ` (archivo ${fileIndex}/${fileCount})` : '';
-      if (totalBytes) {
-        const pct = Math.min(100, Math.round((loadedBytes / totalBytes) * 100));
-        downloadTrack.classList.remove('is-indeterminate');
-        downloadFill.style.width = pct + '%';
-        downloadPercent.textContent = pct + '%';
-        downloadBytes.textContent = `${formatMB(loadedBytes)} MB / ${formatMB(totalBytes)} MB`;
-        bootLog.textContent = `Descargando el juego…${multiFile}`;
-      } else {
-        // Sin Content-Length conocido: barra indeterminada, pero
-        // seguimos mostrando los MB ya descargados para que quede claro
-        // que la descarga avanza y no está colgada.
-        downloadTrack.classList.add('is-indeterminate');
-        downloadPercent.textContent = '';
-        downloadBytes.textContent = loadedBytes ? `${formatMB(loadedBytes)} MB descargados` : '';
-        bootLog.textContent = `Descargando el juego…${multiFile}`;
-      }
-    },
     onBootMessage: (msg) => { bootLog.textContent = msg; },
     onReady: () => {
       bootScreen.style.display = 'none';
     },
     onError: (msg) => {
-      downloadProgress.style.display = 'none';
-      bootSpinner.style.display = '';
       bootLog.textContent = msg;
-      bootSpinner.remove();
+      bootScreen.querySelector('.crt-spinner')?.remove();
     }
   });
 }

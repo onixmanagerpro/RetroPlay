@@ -81,10 +81,6 @@ const CONSOLE_CORE_MAP = {
   'PS2': { core: 'play', folder: 'emulators/ps2' }
 };
 
-// Estos mensajes rotativos cubren la fase de ARRANQUE (después de que el
-// archivo del juego ya se descargó por completo -- ver la descarga con
-// progreso real en launch()): cargar el reproductor, el núcleo WASM, y
-// montar el disco ya descargado en el filesystem virtual del emulador.
 const BOOT_MESSAGES = [
   'Cargando reproductor EmulatorJS…',
   'Descargando núcleo WebAssembly…',
@@ -100,7 +96,10 @@ class EmulatorController {
     this._bootLogTimer = null;
     this._active = false;
     this._iframe = null; // iframe activo de la partida en curso
-    this._blobUrls = []; // blob: URLs de los archivos del juego actual
+    this._romLoadAbortController = null;
+    this._romObjectUrls = new Set();
+    this._romAssets = null;
+    this._startTimeout = null;
   }
 
   isSupported(consoleId) {
@@ -140,12 +139,53 @@ class EmulatorController {
     iWin.focus();
   }
 
+  async _prepareGoogleDriveEntries(fileField, iWin, onBootMessage, signal) {
+    const assets = await window.loadGoogleDriveGameFiles(fileField, {
+      signal,
+      onProgress: onBootMessage
+    });
+
+    // EmulatorJS identifica los File mediante instanceof dentro del iframe,
+    // por eso el objeto se crea en el realm del iframe y conserva el .cue.
+    if (typeof iWin.File !== 'function') {
+      assets.release();
+      throw new Error('Este navegador no admite File para cargar el juego en memoria.');
+    }
+
+    const entries = [{
+      name: assets.main.name,
+      size: assets.main.size,
+      file: new iWin.File([assets.main.blob], assets.main.name, { type: assets.main.mimeType })
+    }];
+
+    for (const companion of assets.companions) {
+      const objectUrl = URL.createObjectURL(companion.blob);
+      this._romObjectUrls.add(objectUrl);
+      // mountedName mantiene exactamente lo escrito en la línea FILE del CUE.
+      entries.push({ name: companion.mountedName, size: companion.size, url: objectUrl });
+    }
+
+    this._romAssets = assets;
+    return entries;
+  }
+
+  _releaseRomResources() {
+    this._romLoadAbortController?.abort();
+    this._romLoadAbortController = null;
+
+    for (const objectUrl of this._romObjectUrls) URL.revokeObjectURL(objectUrl);
+    this._romObjectUrls.clear();
+
+    this._romAssets?.release?.();
+    this._romAssets = null;
+  }
+
   /**
    * Lanza el emulador para un juego dado dentro del contenedor indicado.
    * `hostEl` es el nodo DOM (#emulator-canvas-host) donde se crea el
    * iframe aislado que aloja al reproductor real.
    */
-  async launch(game, hostEl, { onBootMessage, onDownloadProgress, onReady, onError } = {}) {
+  async launch(game, hostEl, { onBootMessage, onReady, onError } = {}) {
     if (!this.isSupported(game.console)) {
       onError?.(`La consola "${game.console}" no está configurada para emulación en navegador.`);
       return;
@@ -163,17 +203,18 @@ class EmulatorController {
     this._active = true;
     this.currentGame = game;
     this.currentConsole = game.console;
-    // Blob URLs creadas por esta partida (ver más abajo): se liberan al
-    // cerrar el juego para no acumular cientos de MB en memoria si la
-    // persona encadena varias partidas sin recargar la página.
-    this._blobUrls = [];
+    const loadAbortController = new AbortController();
+    this._romLoadAbortController = loadAbortController;
     const coreInfo = CONSOLE_CORE_MAP[game.console];
+
+    this._runBootSequence(onBootMessage);
     hostEl.innerHTML = '';
 
     try {
       // Intentamos recuperar un save-state automático previo (autosave
       // al salir del juego la última vez) para ofrecer continuidad.
       const savedState = await retroStorage.loadEmulatorState(game.id, 'auto');
+      if (loadAbortController.signal.aborted || !this._active || this.currentGame !== game) return;
 
       const iframe = document.createElement('iframe');
       iframe.setAttribute('allow', 'gamepad; fullscreen; autoplay');
@@ -222,88 +263,31 @@ class EmulatorController {
       //         el .bin por su nombre, ya está montado.
       //     Ver js/github-release-source.js (resolveGameFileEntries) para
       //     el detalle de por qué esto es necesario con GitHub Releases.
-      const entries = await window.resolveGameFileEntries(game.file);
+      const entries = window.isGoogleDriveGameSource?.(game.file)
+        ? await this._prepareGoogleDriveEntries(game.file, iWin, onBootMessage, loadAbortController.signal)
+        : await window.resolveGameFileEntries(game.file);
       // Tanto las rutas locales como las de github-release:// (que ahora
       // pasan por nuestro proxy /api/github-asset, ver
       // js/github-release-source.js) son URLs relativas al propio
       // dominio de RetroPlay -- ya no hace falta distinguir el caso
       // "URL absoluta de GitHub" de antes.
-      const toAbsoluteUrl = (entry) => new URL(entry.url, window.location.href).href;
-
-      // ---------------------------------------------------------------
-      // DESCARGA PREVIA CON PROGRESO REAL (crítico para PS1)
-      // ---------------------------------------------------------------
-      // Un disco de PS1 (.bin) pesa fácilmente cientos de MB. Si le
-      // pasamos la URL directamente a EJS_gameUrl/EJS_externalFiles,
-      // EmulatorJS la descarga por dentro y RetroPlay no tiene forma de
-      // saber cuántos bytes van ni cuántos faltan -- de ahí que antes
-      // solo hubiera un spinner con mensajes de texto genéricos.
-      //
-      // En su lugar, descargamos aquí mismo cada archivo con
-      // fetchWithProgress() (ver github-release-source.js), sumamos el
-      // progreso de todos los archivos del juego (un .cue+.bin cuentan
-      // como una sola descarga combinada) y se lo reportamos a la UI
-      // como bytes reales / bytes totales. El resultado se convierte en
-      // un blob: URL local, que es instantáneo de montar para
-      // EmulatorJS -- ya no vuelve a tocar la red para estos archivos.
-      const knownTotalBytes = entries.reduce((sum, e) => sum + (e.size || 0), 0);
-      // Si ni la API de GitHub ni el servidor local informaron tamaño
-      // para NINGÚN archivo, no hay total fiable: la UI debe mostrar un
-      // indicador indeterminado en vez de un porcentaje inventado.
-      const hasReliableTotal = entries.some(e => e.size) && knownTotalBytes > 0;
-      const loadedPerEntry = new Array(entries.length).fill(0);
-
-      const reportDownloadProgress = () => {
-        const loadedBytes = loadedPerEntry.reduce((sum, n) => sum + n, 0);
-        onDownloadProgress?.({
-          loadedBytes,
-          totalBytes: hasReliableTotal ? knownTotalBytes : null,
-          fileIndex: entries.length > 1 ? loadedPerEntry.filter(n => n > 0).length : 1,
-          fileCount: entries.length,
-        });
-      };
-      reportDownloadProgress();
-
-      const blobs = await Promise.all(entries.map((entry, i) =>
-        window.fetchWithProgress(toAbsoluteUrl(entry), (loaded) => {
-          loadedPerEntry[i] = loaded;
-          reportDownloadProgress();
-        })
-      ));
-      const blobUrls = blobs.map(blob => {
-        const url = URL.createObjectURL(blob);
-        this._blobUrls.push(url);
-        return url;
-      });
+      const toAbsoluteUrl = (entry) => entry.file || new URL(entry.url, window.location.href).href;
 
       const MAIN_FILE_EXTENSIONS = ['cue', 'm3u', 'ccd', 'toc'];
-      let mainIndex = entries.findIndex(e => MAIN_FILE_EXTENSIONS.includes(
+      let mainEntry = entries.find(e => MAIN_FILE_EXTENSIONS.includes(
         e.name.split('.').pop().toLowerCase()
       ));
-      if (mainIndex === -1) mainIndex = 0;
+      if (!mainEntry) mainEntry = entries[0];
 
-      iWin.EJS_gameUrl = blobUrls[mainIndex];
+      iWin.EJS_gameUrl = toAbsoluteUrl(mainEntry);
 
-      const companionIndexes = entries.map((_, i) => i).filter(i => i !== mainIndex);
-      if (companionIndexes.length > 0) {
+      const companionEntries = entries.filter(e => e !== mainEntry);
+      if (companionEntries.length > 0) {
         iWin.EJS_externalFiles = {};
-        for (const i of companionIndexes) {
-          iWin.EJS_externalFiles[entries[i].name] = blobUrls[i];
+        for (const entry of companionEntries) {
+          iWin.EJS_externalFiles[entry.name] = toAbsoluteUrl(entry);
         }
       }
-
-      // La descarga real ya terminó en este punto -- lo que sigue
-      // (arranque del núcleo WASM, montaje del disco) es la fase de
-      // "boot", así que a partir de aquí arrancamos los BOOT_MESSAGES
-      // rotativos en vez de la barra de progreso de descarga.
-      onDownloadProgress?.({
-        loadedBytes: knownTotalBytes || loadedPerEntry.reduce((s, n) => s + n, 0),
-        totalBytes: hasReliableTotal ? knownTotalBytes : null,
-        fileIndex: entries.length,
-        fileCount: entries.length,
-        done: true,
-      });
-      this._runBootSequence(onBootMessage);
       // EJS_pathtodata la usa el reproductor (emulator.min.js) para pedir
       // los datos pesados de cada core (*-wasm.data, *.wasm...), y ahí sí
       // queremos el CDN oficial -- no vendorizamos esos binarios.
@@ -332,6 +316,9 @@ class EmulatorController {
       iWin.EJS_fullscreenOnLoaded = false;
       iWin.EJS_volume = 0.6;
       iWin.EJS_gameID = game.id;
+      // Las ROM de Drive no deben persistir en la caché IndexedDB interna de
+      // EmulatorJS: los bytes sólo se mantienen durante esta partida.
+      if (this._romAssets) iWin.EJS_cacheConfig = { enabled: false };
       // askBeforeExit=false porque el cierre limpio ya lo gestionamos
       // nosotros desde la topbar de RetroPlay (autosave incluido).
       iWin.EJS_askBeforeExit = false;
@@ -373,17 +360,31 @@ class EmulatorController {
       // informa por la UI de RetroPlay en vez de dejar visible la
       // pantalla interna del core.
       //
-      // A diferencia de antes, en este punto el .bin/.cue YA está
-      // descargado por completo (ver la descarga previa con progreso
-      // más arriba): EJS_gameUrl/EJS_externalFiles apuntan a blob: URLs
-      // locales, instantáneas de montar. Por eso el plazo aquí solo
-      // necesita cubrir el arranque del núcleo WASM y el montaje del
-      // disco en el filesystem virtual, no la transferencia de red --
-      // con un suelo generoso para conexiones lentas al cargar el propio
-      // core (que sí sale del CDN) y un techo para no esperar
-      // indefinidamente si el archivo de verdad está roto.
-      const startTimeoutMs = 45000;
-      const startTimeout = setTimeout(() => {
+      // El plazo NO puede ser un número fijo pequeño: un disco de PS1
+      // (.bin) pesa fácilmente cientos de MB, y en juegos multi-archivo
+      // (.cue+.bin) esos MB además pasan por nuestro proxy CORS
+      // (api/github-asset.js, ver github-release-source.js) antes de
+      // llegar al core. Con un timeout fijo de pocos segundos, esta
+      // pantalla de "archivo no válido" saltaba mientras el .bin TODAVÍA
+      // se estaba descargando -- un falso fallo, no un problema real del
+      // archivo. Por eso el plazo se calcula a partir del peso total
+      // conocido de los archivos del juego (entries[].size, viene de la
+      // API de GitHub cuando aplica): una descarga muy lenta de 512KB/s
+      // más un margen fijo para que el core arranque y monte el disco,
+      // con un suelo y un techo razonables para no esperar ni muy poco
+      // ni indefinidamente si el archivo de verdad está roto.
+      const totalBytes = entries.reduce((sum, e) => sum + (e.size || 0), 0);
+      const MIN_ASSUMED_SPEED_BYTES_PER_SEC = 512 * 1024; // 512KB/s, conexión lenta
+      const BOOT_OVERHEAD_MS = 15000; // descarga del core wasm + montaje del FS
+      // El techo (240s) se queda por debajo del límite de streaming de
+      // la función Edge del proxy (300s, ver api/github-asset.js) --no
+      // tiene sentido esperar más que lo que la propia plataforma va a
+      // dejar durar la descarga.
+      const startTimeoutMs = Math.min(240000, Math.max(
+        20000,
+        (totalBytes / MIN_ASSUMED_SPEED_BYTES_PER_SEC) * 1000 + BOOT_OVERHEAD_MS
+      ));
+      this._startTimeout = setTimeout(() => {
         if (this._active && this.currentGame === game) {
           onError?.('El archivo de este juego no es un disco de PS1 válido (.bin/.cue/.iso), así que el núcleo no pudo arrancarlo automáticamente. Sustituye el archivo en /games/ps1/ por una imagen de disco real.');
           this.close({ autoSave: false });
@@ -396,7 +397,8 @@ class EmulatorController {
       // tiene el último progreso real.
       iWin.EJS_onSaveState = (e) => this._handleSaveStateEvent(e);
       iWin.EJS_onGameStart = () => {
-        clearTimeout(startTimeout);
+        clearTimeout(this._startTimeout);
+        this._startTimeout = null;
         clearInterval(this._bootLogTimer);
         onReady?.();
         retroStorage.recordPlayed(game.id, 5);
@@ -410,9 +412,13 @@ class EmulatorController {
 
       await this._injectLoader(iDoc, iWin);
     } catch (err) {
+      if (loadAbortController.signal.aborted || !this._active || this.currentGame !== game) {
+        return;
+      }
       console.error('[emulator] Error al iniciar', err);
       clearInterval(this._bootLogTimer);
-      onError?.('No se pudo iniciar el emulador. Comprueba tu conexión: los núcleos WebAssembly se cargan bajo demanda la primera vez.');
+      await this.close({ autoSave: false });
+      onError?.(err.message || 'No se pudo iniciar el emulador. Comprueba tu conexión e inténtalo de nuevo.');
     }
   }
 
@@ -523,6 +529,9 @@ class EmulatorController {
       try { await this.saveState('auto'); } catch (_) { /* el core puede no soportar save-state */ }
     }
     clearInterval(this._bootLogTimer);
+    clearTimeout(this._startTimeout);
+    this._startTimeout = null;
+    this._releaseRomResources();
 
     // Destruir el iframe completo es la limpieza real: se lleva consigo
     // el módulo WASM cargado, todos los listeners internos de
@@ -532,17 +541,6 @@ class EmulatorController {
     if (this._iframe) {
       this._iframe.remove();
       this._iframe = null;
-    }
-
-    // Liberar las blob: URLs creadas para esta partida (ver launch()):
-    // cada una retiene en memoria los bytes completos del .bin/.cue
-    // descargado, así que sin esto la memoria crecería con cada partida
-    // sucesiva hasta que se recargue la página entera.
-    if (this._blobUrls) {
-      for (const url of this._blobUrls) {
-        URL.revokeObjectURL(url);
-      }
-      this._blobUrls = [];
     }
 
     this._active = false;
