@@ -161,13 +161,22 @@
       "console": "PS1",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786836291/images_nowrlx.webp",
-      "file": [
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.USA.cue",
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.USA.bin"
-      ],
+      "file": {
+        "source": "google-drive",
+        "cue": {
+          "id": "1-eLGgWHfaeXqIbE2EqZBMwZv-n5D9j7A",
+          "name": "Crash.Bandicoot.USA.cue"
+        },
+        "files": [
+          {
+            "id": "1VLx-cU2Jxdz9xTXZe3SgZicIASJpP8Uy",
+            "name": "Crash Bandicoot (USA).bin"
+          }
+        ]
+      },
       "genre": "Plataformas",
       "players": "1",
-      "year": 1996
+      "year": 1999
     },
     {
       "id": "ps1-002",
