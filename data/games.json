@@ -322,7 +322,7 @@
       "year": 1999
     },
     {
-      "id": "ps1-007",
+      "id": "ps1-006",
       "name": "Metal Slug",
       "console": "PS1",
       "type": "browser",
@@ -343,6 +343,29 @@
       "genre": "Accion",
       "players": "2",
       "year": 1999
-    }
+    },
+    {
+      "id": "ps1-007",
+      "name": "Tarzan",
+      "console": "PS1",
+      "type": "browser",
+      "cover": "",
+      "file": {
+        "source": "google-drive",
+        "cue": {
+          "id": "1ufJm9ufLdTZ-agToMHRK_1pe2AZsvIvu",
+          "name": "Spider-Man.USA.cue"
+        },
+        "files": [
+          {
+            "id": "12MGCiq9N1l0YmWb5nQBS6EN9eMxf8Mc5",
+            "name": "Spider-Man (USA).bin"
+          }
+        ]
+      },
+      "genre": "Plataformas",
+      "players": "1",
+      "year": 1999
+    },
   ]
 }
