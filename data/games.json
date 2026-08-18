@@ -162,8 +162,8 @@
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786836291/images_nowrlx.webp",
       "file": [
-        "https://drive.google.com/file/d/1LI3IsGfptqIy4zT5wkp_WGu1T07xogoi/view?usp=drive_link",
-        "https://drive.google.com/file/d/1GdTXTijIamRXyMpZU-V5-F_lbAd_6tkO/view?usp=drive_link"
+        "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.USA.cue",
+        "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.USA.bin"
       ],
       "genre": "Plataformas",
       "players": "1",
