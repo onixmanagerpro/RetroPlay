@@ -184,14 +184,19 @@
       "console": "PS1",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786940325/images_1_ifhkvf.webp",
-      "file":[
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.2.-.Cortex.Strikes.Back.USA.cue",
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Crash.Bandicoot.2.-.Cortex.Strikes.Back.USA.bin"
-      ],
-      "genre": "Plataformas",
-      "players": "2",
-      "year": 1999
-    },
+      "file": {
+        "source": "google-drive",
+        "cue": {
+          "id": "1nGCmmcNMaq5EnSkbVR5rZU-di6el5SwH",
+          "name": "Crash.Bandicoot.2.-.Cortex.Strikes.Back.USA.cue"
+        },
+        "files": [
+          {
+            "id": "1rSpwEhN0RLewq0PU_odxHax26DtcWGkN",
+            "name": "Crash Bandicoot 2 - Cortex Strikes Back (USA).bin"
+          }
+        ]
+      },
     {
       "id": "ps1-003",
       "name": "Crash Bandicoot - Warped",
@@ -221,11 +226,20 @@
       "console": "PS1",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786942151/images_e2amfa.webp",
-      "file":[
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Gran.Turismo.2.USA.Simulation.Mode.v1.2.cue",
-        "github-release://onixmanagerpro/RetroPlay@ps1games/Gran.Turismo.2.USA.Simulation.Mode.v1.2.bin"
-      ],
-      "genre": "Carreras",
+      "file": {
+        "source": "google-drive",
+        "cue": {
+          "id": "1YgoK5RkItFgAvDVZsWqPWsH-aOKfGRoK",
+          "name": "Gran.Turismo.2.USA.Simulation.Mode.v1.2.cue"
+        },
+        "files": [
+          {
+            "id": "19taS0BFMUaa58ZiVSzFjbfB4ETeBacU1",
+            "name": "Gran Turismo 2 (USA) (Simulation Mode) (v1.2).bin"
+          }
+        ]
+      },
+      "genre": "Plataformas",
       "players": "1",
       "year": 1999
     },
