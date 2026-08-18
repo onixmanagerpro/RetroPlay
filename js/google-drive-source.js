@@ -2,8 +2,9 @@
  * Cargador directo de archivos públicos de Google Drive.
  *
  * Los bytes se solicitan desde el navegador y nunca pasan por Vercel. Para
- * juegos de PS1 se descarga primero el CUE, se leen sus líneas FILE y sólo se
- * obtienen los BIN declarados en el manifiesto del catálogo.
+ * Las ROM de archivo único se descargan como File en memoria. Para juegos con
+ * CUE (como PS1), se descarga primero el CUE, se leen sus líneas FILE y sólo
+ * se obtienen los BIN declarados en el manifiesto del catálogo.
  */
 
 const GOOGLE_DRIVE_SOURCE = 'google-drive';
@@ -99,8 +100,16 @@ async function fetchGoogleDriveBlob(entry, { signal } = {}) {
 }
 
 /**
- * Descarga en memoria un juego definido así:
+ * Descarga en memoria un juego definido en uno de estos formatos:
  *
+ * // ROM de archivo único: SNES, N64, Mega Drive, Dreamcast, PS2, etc.
+ * {
+ *   source: 'google-drive',
+ *   id: '...',
+ *   name: 'Juego.smc'
+ * }
+ *
+ * // Juego CUE + archivos asociados: PS1 (o cualquier core que use CUE).
  * {
  *   source: 'google-drive',
  *   cue: { id: '...', name: 'Juego.cue' },
@@ -110,6 +119,24 @@ async function fetchGoogleDriveBlob(entry, { signal } = {}) {
 async function loadGoogleDriveGameFiles(fileField, { signal, onProgress } = {}) {
   if (!isGoogleDriveGameSource(fileField)) {
     throw new Error('La fuente del juego no es una configuración de Google Drive válida.');
+  }
+
+  // Para ROM de archivo único usamos el propio objeto de fuente: { id, name }.
+  // La presencia de cue activa el flujo multiarchivo, manteniendo la
+  // compatibilidad exacta con las entradas de PS1 que ya funcionan.
+  if (!fileField.cue) {
+    const romEntry = validateDriveEntry(fileField, 'archivo');
+    onProgress?.(`Cargando ${romEntry.name} desde Google Drive…`);
+    const main = await fetchGoogleDriveBlob(romEntry, { signal });
+
+    return {
+      main,
+      companions: [],
+      totalBytes: main.size,
+      release() {
+        this.main.blob = null;
+      }
+    };
   }
 
   const cueEntry = validateDriveEntry(fileField.cue, 'cue');
