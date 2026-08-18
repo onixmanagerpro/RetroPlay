@@ -65,7 +65,7 @@
 // URL base del proxy de assets (Deno Deploy). No consume cuota de Vercel:
 // las descargas pesadas (ROMs/discos) pasan por aquí en vez de por
 // funciones de Vercel. Debe quedar IDÉNTICA a la de google-drive-source.js.
-const ASSET_PROXY_BASE = 'https://CAMBIA-ESTO.deno.dev';
+const ASSET_PROXY_BASE = 'https://retroplay.onixmanagerpro.deno.net';
 
 const GITHUB_RELEASE_SCHEME = 'github-release://';
 
