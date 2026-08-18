@@ -128,10 +128,16 @@
       "console": "Nintendo 64",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786840351/super_mario_64-1683922_1_rj6wgg.webp",
-      "file": "/games/n64/Super Mario 64 (U) [!].z64",
-      "genre": "plataformas",
+      "files": [
+          {
+            "id": "1ER_TM9aJT3QYywCM_MpGdQDycEhsNw-S",
+            "name": "Super Mario 64 (U) [!].z64"
+          }
+        ]
+      },
+      "genre": "Plataformas",
       "players": "1",
-      "year": 1996
+      "year": 1997
     },
     {
       "id": "n64-002",
