@@ -54,10 +54,14 @@
       "console": "SNES",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786785483/mariokartsnes_1_tmjlvl.webp",
-      "file": "/games/snes/Super Mario Kart (U) [!].smc",
+       "file": {
+        "source": "google-drive",
+        "id": "1YL-JucS_JCySsLayJfmqewq9NsQ2WvIL",
+        "name": "Mario Kart 64 (E) (V1.1) [!].z64"
+      },
       "genre": "Carreras",
-      "players": "2",
-      "year": 1992
+      "players": "1",
+      "year": 1998
     },
     {
       "id": "snes-005",
@@ -65,10 +69,14 @@
       "console": "SNES",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786786934/marioallstars_ue2jlh.webp",
-      "file": "/games/snes/Super Mario All-Stars (U) [!].smc",
+      "file": {
+        "source": "google-drive",
+        "id": "1n6gkTV7UHR8-q766NbRgyQYgzdlLaUJi",
+        "name": "Super Mario All-Stars (U) [!].smc"
+      },
       "genre": "Plataformas",
-      "players": "2",
-      "year": 1993
+      "players": "1",
+      "year": 1998
     },
     {
       "id": "snes-006",
@@ -76,7 +84,11 @@
       "console": "SNES",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786793692/2ee5300e-3bfb-4c98-b760-dc6d518d_np1obu.webp",
-      "file": "/games/snes/Dragon Ball Z - Super Butouden 3 (Japan).sfc",
+      "file": {
+        "source": "google-drive",
+        "id": "10an3sxuUmIBZdF6EAYo-g1FhuvR-7YBS",
+        "name": "Dragon Ball Z - Super Butouden 3 (Japan).sfc"
+      },
       "genre": "Lucha",
       "players": "2",
       "year": 1994
