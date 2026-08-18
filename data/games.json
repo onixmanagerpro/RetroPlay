@@ -64,10 +64,14 @@
       "console": "SNES",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786794196/images_bicgiw.webp",
-      "file": "/games/snes/Aladdin (U) [!].smc",
-      "genre": "plataformas",
+      "file": {
+        "source": "google-drive",
+        "id": "1CuLM4FJin8FZcGIH_5curNfGNK_cd4_U",
+        "name": "Aladdin (U) [!].smc"
+      },
+      "genre": "Plataformas",
       "players": "1",
-      "year": 1993
+      "year": 1997
     },
     {
       "id": "snes-007",
