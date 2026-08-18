@@ -206,6 +206,9 @@ function buildAssetProxyUrl(asset) {
  * el esquema github-release://, se devuelve tal cual sin tocar nada.
  */
 async function resolveGameFileUrl(fileField) {
+  if (window.isGoogleDriveRef && window.isGoogleDriveRef(fileField)) {
+    return window.resolveGoogleDriveUrl(fileField);
+  }
   if (!isGithubReleaseRef(fileField)) return fileField;
   const asset = await resolveGithubReleaseAsset(fileField);
   return buildAssetProxyUrl(asset);
@@ -249,6 +252,13 @@ async function resolveGameFileUrl(fileField) {
 async function resolveGameFileEntries(fileField) {
   const list = Array.isArray(fileField) ? fileField : [fileField];
   return Promise.all(list.map(async (ref) => {
+    // google-drive://... se resuelve en js/google-drive-source.js. Se
+    // comprueba primero porque es una comprobación de string barata y
+    // deja isGithubReleaseRef/el resto del flujo intactos para todo lo
+    // que no sea una referencia de Drive.
+    if (window.isGoogleDriveRef && window.isGoogleDriveRef(ref)) {
+      return window.resolveGoogleDriveEntry(ref);
+    }
     if (isGithubReleaseRef(ref)) {
       // El nombre real viene del propio asset reportado por la API de
       // GitHub (resolveGithubReleaseAsset), NO de la URL final: la URL
