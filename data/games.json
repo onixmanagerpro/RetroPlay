@@ -114,7 +114,11 @@
       "console": "SNES",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786794461/images_2_fybhl4.webp",
-      "file": "/games/snes/Street Fighter II Turbo - Hyper Fighting (USA).sfc",
+      "file": {
+        "source": "google-drive",
+        "id": "1oUiv8D7JJdqxqIcCReotQbIvaCtSOdUV",
+        "name": "Street Fighter II Turbo - Hyper Fighting (USA).sfc"
+      },
       "genre": "Shooter",
       "players": "1",
       "year": 1992
@@ -125,8 +129,12 @@
       "console": "SNES",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786841469/parodius-non-sense-fantasy-europ_uilglt.webp",
-      "file": "/games/snes/Parodius (Europe).sfc",
-      "genre": "plataformas",
+      "file": {
+        "source": "google-drive",
+        "id": "14FgK8Jau8Uk8Te1di9mlwnZd5hBOCZW4",
+        "name": "Parodius (Europe).sfc"
+      },
+      "genre": "Shooter",
       "players": "1",
       "year": 1992
     },
