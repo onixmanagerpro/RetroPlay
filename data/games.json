@@ -4,6 +4,21 @@
   "note": "Catalogo de EJEMPLO. Las entradas marcadas con verified:true han sido contrastadas con fuentes publicas (ver 'source' en cada una); el resto son placeholders genericos sin atribucion de autoria especifica, pensados unicamente para probar el flujo tecnico de la plataforma (ficha, emulador, descarga). Sustituye cualquier entrada por contenido real del que tengas derecho de uso antes de un despliegue publico.",
   "games": [
     {
+      "id": "Gba-001",
+      "name": "Metal Slug",
+      "console": "GBA",
+      "type": "browser",
+      "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1787091559/Metal-Slug-Advance_veu8pq.webp",
+      "file": {
+        "source": "google-drive",
+        "id": "1tUC6ywHc963-Mz_elvvFg-r5AQj1R26w",
+        "name": "Metal Slug Advance (Europe).gba"
+      },
+      "genre": "Shooter",
+      "players": "1",
+      "year": 1997
+    },
+    {
       "id": "snes-001",
       "name": "Mario World",
       "console": "SNES",
