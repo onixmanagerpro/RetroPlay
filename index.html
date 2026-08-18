@@ -63,7 +63,7 @@
     <div class="hero">
       <p class="eyebrow hero-eyebrow">Mi biblioteca</p>
       <h1 class="hero-title">Tu consola favorita, <span class="hl">sin instalar nada</span>.</h1>
-      <p class="hero-desc">Juega a consolas clásicas directamente en el navegador. Elige una, elige un juego, pulsa jugar. Sin que descargues nada en tu dispositivo. Tambien puedes conectar un mando.</p>
+      <p class="hero-desc">Cinco consolas clásicas corriendo por WebAssembly directamente en el navegador. Elige una, elige un juego, pulsa jugar.</p>
       <div class="hero-actions">
         <a href="#/play" class="btn btn-primary btn-lg" data-nav="play">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -322,17 +322,8 @@
   <div class="emulator-stage">
     <div id="emulator-canvas-host"></div>
     <div class="emulator-boot-screen" id="emulator-boot-screen">
-      <div class="crt-spinner" id="emulator-boot-spinner" aria-hidden="true"></div>
-      <div class="emulator-download-progress" id="emulator-download-progress">
-        <div class="emulator-download-track">
-          <div class="emulator-download-fill" id="emulator-download-fill"></div>
-        </div>
-        <div class="emulator-download-stats">
-          <span id="emulator-download-percent">0%</span>
-          <span id="emulator-download-bytes" class="emulator-download-bytes"></span>
-        </div>
-      </div>
-      <div class="emulator-boot-log" id="emulator-boot-log">Descargando el juego…</div>
+      <div class="crt-spinner" aria-hidden="true"></div>
+      <div class="emulator-boot-log" id="emulator-boot-log">Iniciando núcleo del emulador…</div>
     </div>
   </div>
 
