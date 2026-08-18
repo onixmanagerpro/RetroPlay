@@ -144,7 +144,11 @@
       "console": "Mega Drive",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786840892/Dw4enWVXQAAO3mj_jmugsp.webp",
-      "file": "/games/megadrive/Sonic The Hedgehog (USA, Europe).md",
+      "file": {
+        "source": "google-drive",
+        "id": "1O7oT5ISlVseGOMbrz_0a_Vtr3eK9gLWD",
+        "name": "Sonic The Hedgehog (USA, Europe).md"
+      },
       "genre": "Plataformas",
       "players": "1"
     },
@@ -154,7 +158,11 @@
       "console": "Mega Drive",
       "type": "browser",
       "cover": "https://res.cloudinary.com/dgfrkwkf2/image/upload/v1786841723/sonic_the_hedgehog_2-5651061_dsgfsw.jpg",
-      "file": "/games/megadrive/Sonic The Hedgehog 2 (World) (Rev A).md",
+      "file": {
+        "source": "google-drive",
+        "id": "1CaRZvT4jUCkKHBSi17eiZhsKg917nKix",
+        "name": "Sonic The Hedgehog 2 (World) (Rev A).md"
+      },
       "genre": "Plataformas",
       "players": "1"
     },
