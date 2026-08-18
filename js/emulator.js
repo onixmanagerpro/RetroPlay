@@ -400,6 +400,12 @@ class EmulatorController {
         clearTimeout(this._startTimeout);
         this._startTimeout = null;
         clearInterval(this._bootLogTimer);
+        // Ver el bloque de comentarios "BUG DEL VENDOR" más abajo: aquí es
+        // donde gameManager ya existe de verdad, así que es el único punto
+        // fiable para forzar la sincronización del gamepad virtual táctil
+        // (crítico en PS1, donde la descarga pesada del disco hace que las
+        // dos vías nativas de EmulatorJS lleguen tarde o nunca).
+        this._syncVirtualGamepad(this.getEmulatorInstance());
         onReady?.();
         retroStorage.recordPlayed(game.id, 5);
       };
@@ -587,6 +593,35 @@ class EmulatorController {
     if (instance?.controlMenu) {
       instance.controlMenu.style.display = '';
     }
+  }
+
+  /**
+   * Botón manual de respaldo ("Controles táctiles") en la topbar del
+   * emulador. _syncVirtualGamepad ya se dispara solo en EJS_onGameStart,
+   * pero se deja este interruptor accesible al usuario por si en una
+   * conexión muy lenta el propio evento onGameStart tarda en llegar o el
+   * usuario simplemente quiere forzar el estado sin reabrir el juego.
+   * Alterna sobre el estado REAL actual del div (instance.virtualGamepad),
+   * no sobre la preferencia guardada, para que el botón siempre refleje lo
+   * que se ve en pantalla ahora mismo.
+   */
+  toggleVirtualGamepad() {
+    const instance = this.getEmulatorInstance();
+    if (!instance || typeof instance.toggleVirtualGamepad !== 'function') {
+      return null;
+    }
+    const currentlyVisible = instance.virtualGamepad
+      ? instance.virtualGamepad.style.display !== 'none'
+      : false;
+    const nextVisible = !currentlyVisible;
+    instance.toggleVirtualGamepad(nextVisible);
+    if (instance.gameManager && typeof instance.gameManager.setVariable === 'function') {
+      instance.gameManager.setVariable('virtual-gamepad', nextVisible ? 'enabled' : 'disabled');
+    }
+    if (instance.allSettings) {
+      instance.allSettings['virtual-gamepad'] = nextVisible ? 'enabled' : 'disabled';
+    }
+    return nextVisible;
   }
 
   _bytesToBase64(bytes) {

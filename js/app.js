@@ -863,6 +863,15 @@ function bindGlobalEvents() {
   document.getElementById('emulator-config-gamepad').addEventListener('click', () => {
     emulatorController.openNativeGamepadConfig();
   });
+  document.getElementById('emulator-toggle-touch').addEventListener('click', () => {
+    // Respaldo manual: fuerza mostrar/ocultar el gamepad virtual táctil
+    // por si la sincronización automática (EJS_onGameStart) todavía no
+    // ha tenido ocasión de correr -- típico en PS1, donde el disco puede
+    // seguir descargándose varios segundos después de que el usuario ya
+    // esté mirando la pantalla del juego.
+    const result = emulatorController.toggleVirtualGamepad();
+    if (result !== null) flashButton('emulator-toggle-touch');
+  });
   document.getElementById('emulator-fullscreen').addEventListener('click', () => {
     const stage = document.querySelector('.emulator-stage');
     if (!document.fullscreenElement) {
