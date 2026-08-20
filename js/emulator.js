@@ -396,6 +396,14 @@ class EmulatorController {
       // IndexedDB vía storage.js -- así "Continuar jugando" siempre
       // tiene el último progreso real.
       iWin.EJS_onSaveState = (e) => this._handleSaveStateEvent(e);
+      // Sin este handler, EmulatorJS considera que nadie está escuchando el
+      // evento "loadState" (callEvent("loadState") devuelve 0) y cae a su
+      // flujo nativo: abre el selector de archivos del sistema operativo
+      // dentro del iframe y no reporta nada si el usuario no completa esa
+      // selección -- de ahí que "cargar" pareciera no hacer nada. Con este
+      // handler, el botón nativo de cargar usa el mismo autosave que ya
+      // gestiona retroStorage, igual que ya hace el guardado.
+      iWin.EJS_onLoadState = () => { this.loadState('manual').catch(() => {}); };
       iWin.EJS_onGameStart = () => {
         clearTimeout(this._startTimeout);
         this._startTimeout = null;
