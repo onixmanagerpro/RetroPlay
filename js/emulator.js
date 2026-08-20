@@ -322,6 +322,34 @@ class EmulatorController {
       // askBeforeExit=false porque el cierre limpio ya lo gestionamos
       // nosotros desde la topbar de RetroPlay (autosave incluido).
       iWin.EJS_askBeforeExit = false;
+      // El core WASM que EmulatorJS descarga viene en dos variantes: la
+      // moderna y "-legacy". La moderna es la única que exporta
+      // EmulatorJSGetState en su Module -- sin eso, gameManager.getState()
+      // lanza "this.Module.EmulatorJSGetState is not a function" y
+      // save/load state no funcionan nunca, para ningún juego.
+      //
+      // Qué variante se descarga depende de this.webgl2Enabled dentro de
+      // emulator.min.js, que se resuelve así (por orden de prioridad):
+      //   1. Un valor previamente guardado en el localStorage DEL NAVEGADOR
+      //      para este core+juego concreto (preGetSetting).
+      //   2. Si no hay nada en localStorage: EJS_defaultOptions.
+      //   3. Si tampoco hay defaultOptions: el JSON de reporte del core
+      //      (cores/reports/<core>.json), pedido por fetch al CDN.
+      // El paso 3 para snes9x concretamente no declara soporte WebGL2 (el
+      // report real trae "options": {}), así que aunque ese fetch tenga
+      // éxito el resultado es igualmente "-legacy" -- el fetch en sí (que
+      // en algunos navegadores además da 404) nunca fue la causa real.
+      // Y el paso 2 (EJS_defaultOptions) puede perder contra el paso 1 si
+      // el navegador ya tenía algo guardado de una partida anterior.
+      // EJS_disableLocalStorage salta el paso 1 por completo, así que la
+      // resolución cae siempre y de forma determinista en defaultOptions,
+      // sin depender de qué haya en el navegador de cada persona. Solo
+      // afecta a un puñado de ajustes internos del propio reproductor
+      // (hilos, menú, rebobinado, rotación de vídeo) que RetroPlay ya fija
+      // explícitamente vía EJS_Buttons/EJS_* -- no toca las partidas
+      // guardadas, que viven aparte en IndexedDB vía retroStorage.
+      iWin.EJS_disableLocalStorage = true;
+      iWin.EJS_defaultOptions = { webgl2Enabled: 'enabled' };
 
       // ---------------------------------------------------------------
       // ARRANQUE FORZADO SIN MENÚ (todas las consolas, en especial PS1)
