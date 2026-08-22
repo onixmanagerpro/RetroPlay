@@ -89,6 +89,20 @@ const BOOT_MESSAGES = [
   'Sincronizando entrada de mando…'
 ];
 
+// -----------------------------------------------------------------------
+// [SAVE-VERIFY] Mismo prefijo de log que storage.js -- deliberadamente,
+// para que un fallo de guardado/carga se pueda seguir de principio a fin
+// en la consola filtrando por "[SAVE-VERIFY]", sin importar si el fallo
+// ocurrió en la capa de persistencia (storage.js) o en la capa de
+// orquestación del emulador (este archivo).
+// -----------------------------------------------------------------------
+function saveVerifyLog(...args) {
+  console.log('[SAVE-VERIFY]', ...args);
+}
+function saveVerifyError(...args) {
+  console.error('[SAVE-VERIFY]', ...args);
+}
+
 class EmulatorController {
   constructor() {
     this.currentGame = null;
@@ -105,6 +119,29 @@ class EmulatorController {
 
   isSupported(consoleId) {
     return !!CONSOLE_CORE_MAP[consoleId];
+  }
+
+  // [SAVE-VERIFY] Puente hacia el sistema de toasts de app.js
+  // (showToast), sin crear una dependencia dura: si por lo que sea
+  // showToast no está cargado en la página (uso de emulator.js fuera de
+  // este contexto, orden de carga distinto), se degrada a console.error
+  // en vez de lanzar. Un fallo de guardado siempre debe ser visible en
+  // algún sitio -- nunca silencioso -- pero nunca debe romper el resto
+  // de la app por sí mismo.
+  _notifyUser(message) {
+    // showToast() de app.js está diseñado para el flujo de descarga
+    // (progreso + finishToast lo completa/actualiza) y no se
+    // auto-elimina por sí solo -- usarlo tal cual para un aviso puntual
+    // dejaría el toast pegado en pantalla para siempre. Por eso se usa
+    // showSaveWarningToast(), una función separada en app.js pensada
+    // para avisos puntuales con auto-dismiss, que reutiliza el mismo
+    // contenedor y las mismas clases CSS (mismo aspecto visual, sin
+    // duplicar estilos).
+    if (typeof window !== 'undefined' && typeof window.showSaveWarningToast === 'function') {
+      window.showSaveWarningToast(message);
+    } else {
+      saveVerifyError('(sin showSaveWarningToast disponible) ', message);
+    }
   }
 
   /**
@@ -628,24 +665,62 @@ class EmulatorController {
    * EJS_loadStateURL (ver el bloque de comentarios "BUG DEL VENDOR"
    * en launch()).
    */
-  _restorePendingAutoState() {
-    const base64 = this._pendingAutoState;
-    this._pendingAutoState = null;
-    if (!base64) return;
+  // [SAVE-VERIFY] Reintenta la restauración varias veces con backoff
+  // corto antes de rendirse. En cores pesados (PS1, N64) gameManager
+  // puede tardar en exponer loadState incluso DESPUÉS de que
+  // EJS_onGameStart se dispare -- el disparo del evento no garantiza que
+  // el core interno ya haya terminado de inicializar sus estructuras de
+  // guardado. El código anterior se rendía a la primera comprobación
+  // fallida, lo que producía el mismo síntoma exacto que "cargar no hace
+  // nada": el autosave existía, pero se descartaba por llegar demasiado
+  // pronto.
+  _restorePendingAutoState(attempt = 0, expectedGame = this.currentGame) {
+    // [SAVE-VERIFY] Guarda de concurrencia: si el juego se cerró o se
+    // cambió por otro mientras un reintento estaba en curso (setTimeout
+    // pendiente de una llamada anterior), este reintento pertenece a una
+    // partida que ya no está activa y debe abortar sin tocar nada -- de
+    // lo contrario podría interferir con el _pendingAutoState de la
+    // partida NUEVA que el usuario haya abierto entre medias.
+    if (this.currentGame !== expectedGame) {
+      saveVerifyLog('Reintento de restauración abortado: la partida cambió mientras se reintentaba');
+      return;
+    }
 
-    try {
-      const instance = this.getEmulatorInstance();
-      if (!instance?.gameManager?.loadState) {
-        console.warn('[emulator] El core no expone gameManager.loadState todavía; no se pudo restaurar el autosave.');
+    const base64 = this._pendingAutoState;
+    if (!base64) {
+      saveVerifyLog('No hay autosave pendiente que restaurar para', this.currentGame && this.currentGame.id);
+      return;
+    }
+
+    const instance = this.getEmulatorInstance();
+    if (!instance?.gameManager?.loadState) {
+      if (attempt >= 10) {
+        // Tras ~2s de reintentos (10 x 200ms) el core sigue sin exponer
+        // loadState: esto ya no es un problema de timing, es un core que
+        // realmente no soporta save states o falló al inicializar.
+        this._pendingAutoState = null;
+        saveVerifyError('gameManager.loadState nunca quedó disponible tras', attempt, 'intentos; SE PIERDE el autosave pendiente para', this.currentGame && this.currentGame.id);
+        this._notifyUser?.('No se pudo restaurar tu partida guardada: el emulador no respondió a tiempo.');
         return;
       }
+      saveVerifyLog('gameManager.loadState todavía no disponible (intento', attempt + 1, 'de 10); reintentando en 200ms');
+      setTimeout(() => this._restorePendingAutoState(attempt + 1, expectedGame), 200);
+      return;
+    }
+
+    try {
       const bytes = this._base64ToBytes(base64);
       instance.gameManager.loadState(bytes);
+      this._pendingAutoState = null;
+      saveVerifyLog('Autosave restaurado con éxito para', this.currentGame && this.currentGame.id, `(${bytes.length} bytes)`);
     } catch (err) {
       // Un autosave corrupto o de un core/versión incompatible no debe
-      // impedir que la partida arranque -- el usuario simplemente
-      // empieza de cero, igual que si nunca hubiera habido autosave.
-      console.warn('[emulator] No se pudo restaurar el autosave previo; se continúa sin él', err);
+      // impedir que la partida arranque -- el usuario empieza de cero,
+      // pero AHORA se le informa explícitamente de que eso ha pasado, en
+      // vez de asumir en silencio que todo fue bien.
+      this._pendingAutoState = null;
+      saveVerifyError('loadState() lanzó una excepción al restaurar el autosave de', this.currentGame && this.currentGame.id, err);
+      this._notifyUser?.('No se pudo restaurar tu partida guardada (datos incompatibles o corruptos). Se ha empezado una partida nueva.');
     }
   }
 
@@ -782,7 +857,24 @@ class EmulatorController {
   async close({ autoSave = true } = {}) {
     const instance = this.getEmulatorInstance();
     if (autoSave && this.currentGame && instance?.gameManager?.getState) {
-      try { await this.saveState('auto'); } catch (_) { /* el core puede no soportar save-state */ }
+      const gameId = this.currentGame.id;
+      try {
+        await this.saveState('auto');
+        saveVerifyLog('Autosave al cerrar completado para', gameId);
+      } catch (err) {
+        // [SAVE-VERIFY] Antes este catch estaba vacío: si getState()
+        // lanzaba (core ya parcialmente destruido, WASM en mal estado
+        // tras un crash) o si saveEmulatorState() no lograba persistir
+        // en ningún motor, el usuario cerraba el juego creyendo que se
+        // había guardado y en realidad no había pasado nada -- sin
+        // ningún indicio salvo abrir devtools. Ahora se registra
+        // siempre y se avisa al usuario, en vez de fallar en silencio
+        // justo en el momento más crítico (el cierre del juego).
+        saveVerifyError('Autosave al cerrar FALLÓ para', gameId, err);
+        this._notifyUser?.('No se pudo guardar tu progreso al salir. Puedes intentar guardar manualmente con el botón de guardar antes de cerrar la próxima vez.');
+      }
+    } else if (autoSave && this.currentGame) {
+      saveVerifyLog('Autosave al cerrar omitido: el core no expone gameManager.getState para', this.currentGame.id);
     }
     clearInterval(this._bootLogTimer);
     clearTimeout(this._startTimeout);

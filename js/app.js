@@ -495,6 +495,27 @@ function showToast({ id, title, sub }) {
   container.appendChild(el);
 }
 
+// [SAVE-VERIFY] Toast puntual con auto-dismiss, independiente del flujo
+// de descarga (showToast/updateToastProgress/finishToast no se
+// auto-eliminan por sí solos, están pensados para que otro paso los
+// complete). Usado por emulator.js para avisar de fallos reales de
+// guardado/carga que antes se tragaban en silencio.
+function showSaveWarningToast(message) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const id = `save-warning-${Date.now()}`;
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.id = id;
+  el.innerHTML = `
+    <div class="toast-title">Aviso de guardado</div>
+    <div class="toast-sub">${escapeHtml(message)}</div>
+  `;
+  container.appendChild(el);
+  setTimeout(() => { el.remove(); }, 6000);
+}
+window.showSaveWarningToast = showSaveWarningToast;
+
 function updateToastProgress(id, pct) {
   const el = document.getElementById(`toast-${id}`);
   if (!el) return;

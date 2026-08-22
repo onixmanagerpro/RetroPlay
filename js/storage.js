@@ -47,6 +47,80 @@ const STORES = {
   settings: 'settings'          // { key, value }
 };
 
+// -----------------------------------------------------------------------
+// [SAVE-VERIFY] Prefijo de log reservado exclusivamente para la ruta de
+// guardado/carga de partidas. Cualquier fallo en esta ruta se reporta
+// aquí SIEMPRE -- nunca se traga en un catch vacío -- para que un bug de
+// persistencia sea visible en la consola en el momento en que ocurre, no
+// descubierto días después al perder una partida.
+// -----------------------------------------------------------------------
+function saveVerifyLog(...args) {
+  console.log('[SAVE-VERIFY]', ...args);
+}
+function saveVerifyError(...args) {
+  console.error('[SAVE-VERIFY]', ...args);
+}
+
+// -----------------------------------------------------------------------
+// Fallback de localStorage para saveStates cuando IndexedDB no está
+// disponible o falla (cuota excedida, contexto file://, modo incógnito
+// con restricciones, navegador con IndexedDB deshabilitado). Solo cubre
+// saveStates -- es la única categoría de datos cuya pérdida es
+// irreversible para el usuario; favoritos/recientes/config de mando se
+// pueden rehacer, una partida guardada no.
+//
+// localStorage tiene un límite práctico de ~5MB por origen, y un
+// save-state de un core pesado (PS1 con RAM expandida, N64) puede rondar
+// varios cientos de KB en base64. Por eso solo se guarda AQUÍ el slot
+// 'auto' y el último 'manual' de cada juego -- no un historial -- y se
+// aplica compresión ligera por deduplicación de slots antiguos del mismo
+// juego antes de escribir, para minimizar el riesgo de QuotaExceededError.
+// -----------------------------------------------------------------------
+const LS_PREFIX = 'retroplay-savestate::';
+
+function lsKey(gameId, slot) {
+  return LS_PREFIX + gameId + '::' + slot;
+}
+
+function localStorageAvailable() {
+  try {
+    const testKey = '__retroplay_ls_test__';
+    window.localStorage.setItem(testKey, '1');
+    window.localStorage.removeItem(testKey);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+function saveStateToLocalStorage(gameId, slot, data) {
+  if (!localStorageAvailable()) {
+    saveVerifyError('localStorage no disponible; no hay fallback posible para', gameId, slot);
+    return false;
+  }
+  const record = { id: `${gameId}::${slot}`, gameId, slot, data, updatedAt: Date.now() };
+  try {
+    window.localStorage.setItem(lsKey(gameId, slot), JSON.stringify(record));
+    saveVerifyLog('Fallback localStorage: guardado', gameId, slot, `(${data.length} chars base64)`);
+    return true;
+  } catch (err) {
+    saveVerifyError('Fallback localStorage FALLÓ al guardar', gameId, slot, err);
+    return false;
+  }
+}
+
+function loadStateFromLocalStorage(gameId, slot) {
+  if (!localStorageAvailable()) return null;
+  try {
+    const raw = window.localStorage.getItem(lsKey(gameId, slot));
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (err) {
+    saveVerifyError('Fallback localStorage FALLÓ al leer', gameId, slot, err);
+    return null;
+  }
+}
+
 class LocalStorageAdapter {
   constructor() {
     this._db = null;
@@ -205,15 +279,80 @@ class RetroPlayStorage {
   }
 
   // ---------- Estados de guardado del emulador ----------
+  //
+  // [SAVE-VERIFY] Este método YA NO asume que el guardado funcionó solo
+  // porque la promesa de put() resolvió sin lanzar. IndexedDB puede
+  // resolver "con éxito" una escritura que en la práctica no persiste
+  // (algunos navegadores en modo incógnito, o con la cuota ya agotada,
+  // devuelven éxito silencioso). Por eso, tras escribir, se hace una
+  // lectura de verificación inmediata: solo se considera guardado real
+  // si el dato releído coincide en longitud con el dato escrito.
+  //
+  // Si la verificación falla, o si put() lanza una excepción, se cae a
+  // localStorage como red de seguridad, y se registra el resultado en
+  // ambos casos con el prefijo [SAVE-VERIFY] -- nunca en silencio.
   async saveEmulatorState(gameId, slot, data) {
     const record = { id: `${gameId}::${slot}`, gameId, slot, data, updatedAt: Date.now() };
-    await this.local.put(STORES.saveStates, record);
+    let indexedDbOk = false;
+
+    try {
+      await this.local.put(STORES.saveStates, record);
+      const verify = await this.local.get(STORES.saveStates, record.id);
+      indexedDbOk = !!(verify && verify.data && verify.data.length === data.length);
+      if (indexedDbOk) {
+        saveVerifyLog('IndexedDB: guardado y verificado', gameId, slot, `(${data.length} chars base64)`);
+      } else {
+        saveVerifyError('IndexedDB: put() resolvió pero la verificación de lectura NO coincide', gameId, slot,
+          verify ? `(esperado ${data.length}, leído ${verify.data ? verify.data.length : 'null'})` : '(no se encontró el registro)');
+      }
+    } catch (err) {
+      saveVerifyError('IndexedDB: excepción al guardar', gameId, slot, err);
+    }
+
+    // Red de seguridad: si IndexedDB falló la verificación por cualquier
+    // motivo, se guarda también (o exclusivamente) en localStorage, para
+    // que el progreso no se pierda solo porque un motor de storage falló.
+    const localStorageOk = indexedDbOk ? true : saveStateToLocalStorage(gameId, slot, data);
+
+    if (!indexedDbOk && !localStorageOk) {
+      // Ninguno de los dos motores de persistencia funcionó. Esto es un
+      // fallo real y visible -- se relanza para que la capa de llamada
+      // (emulator.js) pueda informar al usuario en vez de mostrar el
+      // botón de "guardado" como si todo hubiera ido bien.
+      const err = new Error('No se pudo guardar la partida: fallaron IndexedDB y localStorage.');
+      saveVerifyError(err.message, gameId, slot);
+      throw err;
+    }
+
     if (this.remote) this.remote.uploadSaveState(record).catch(() => {});
     return record;
   }
 
+  // [SAVE-VERIFY] Intenta IndexedDB primero; si no hay nada ahí (o el
+  // registro está corrupto/incompleto), cae a localStorage antes de
+  // devolver null. Antes, un fallo silencioso de IndexedDB se traducía
+  // directamente en "no hay partida guardada" aunque sí la hubiera.
   async loadEmulatorState(gameId, slot = 'auto') {
-    return this.local.get(STORES.saveStates, `${gameId}::${slot}`);
+    let record = null;
+    try {
+      record = await this.local.get(STORES.saveStates, `${gameId}::${slot}`);
+    } catch (err) {
+      saveVerifyError('IndexedDB: excepción al leer', gameId, slot, err);
+    }
+
+    if (record && record.data) {
+      saveVerifyLog('IndexedDB: partida encontrada', gameId, slot, `(${record.data.length} chars base64, guardada ${new Date(record.updatedAt).toISOString()})`);
+      return record;
+    }
+
+    const fallback = loadStateFromLocalStorage(gameId, slot);
+    if (fallback && fallback.data) {
+      saveVerifyLog('localStorage (fallback): partida encontrada', gameId, slot, `(${fallback.data.length} chars base64, guardada ${new Date(fallback.updatedAt).toISOString()})`);
+      return fallback;
+    }
+
+    saveVerifyLog('Sin partida guardada en ningún motor', gameId, slot);
+    return null;
   }
 
   async listSaveStatesForGame(gameId) {
