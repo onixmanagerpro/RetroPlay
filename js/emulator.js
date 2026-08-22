@@ -767,28 +767,131 @@ class EmulatorController {
   // ---------------------------------------------------------------------
   // Guardado / carga manual de partidas -- botones de la topbar
   // ---------------------------------------------------------------------
+  //
+  // [SAVE-VERIFY] BUG DEL VENDOR: Module.EmulatorJSGetState ausente
+  // ---------------------------------------------------------------
+  // gameManager.getState() (dentro de emulator.min.js) es literalmente
+  // `return this.Module.EmulatorJSGetState()` -- sin ningún fallback.
+  // EmulatorJSGetState es un símbolo que exporta el propio CORE WASM
+  // compilado (genesis_plus_gx-wasm.data, servido desde el CDN de
+  // EmulatorJS), no algo que emulator.min.js pueda sintetizar por su
+  // cuenta. Cuando el build del core servido en un momento dado no
+  // exporta ese símbolo (confirmado aquí para genesis_plus_gx; es un
+  // problema conocido y reportado contra EmulatorJS -- ver issue #1013
+  // del propio repo, "[Bug] Save/Load state doesn't work", con el mismo
+  // síntoma de raíz para otro core), la llamada revienta con
+  // "this.Module.EmulatorJSGetState is not a function" para CUALQUIER
+  // juego de esa consola, siempre -- no es un fallo intermitente ni de
+  // timing (por eso reintentar getState() sin más no sirve de nada, a
+  // diferencia del backoff que sí tiene sentido para loadState en
+  // _restorePendingAutoState).
+  //
+  // Como RetroPlay vendoriza emulator.min.js localmente pero sirve los
+  // binarios de cada core en vivo desde CORE_DATA_CDN, no controlamos
+  // qué build de genesis_plus_gx llega en cada visita -- así que en vez
+  // de asumir que getState() funciona, saveState() ahora se degrada con
+  // gracia a un segundo mecanismo que SÍ es independiente de
+  // EmulatorJSGetState: gameManager.getSaveFile(), que vuelca la
+  // partida guardada tipo pila/batería (SRAM) escribiéndola a través de
+  // la función cwrapped cmd_savefiles y leyéndola de vuelta con
+  // FS.readFile -- el mismo patrón robusto (cwrap + FS) que loadState()
+  // ya usa con éxito para restaurar. No es un snapshot exacto de la
+  // partida en curso (no incluye el estado de la CPU/vídeo a mitad de
+  // frame), pero para cualquier juego con guardado interno (la inmensa
+  // mayoría de Mega Drive/SNES/N64 con batería) SÍ persiste el progreso
+  // real del jugador, en vez de dejar el guardado completamente roto.
   async saveState(slot = 'auto') {
-    const instance = this.getEmulatorInstance();
-    if (!instance?.gameManager?.getState) {
+    if (!this.currentGame) throw new Error('No hay ningún juego activo.');
+    const instance = await this._waitForGameManager();
+    if (!instance) {
       throw new Error('El emulador todavía no está listo para guardar.');
     }
-    const stateBytes = instance.gameManager.getState();
-    const base64 = this._bytesToBase64(stateBytes);
-    await retroStorage.saveEmulatorState(this.currentGame.id, slot, base64);
-    await retroStorage.recordPlayed(this.currentGame.id, 100);
-    return true;
+    const gameManager = instance.gameManager;
+
+    // Camino principal: snapshot completo de memoria (posición exacta
+    // dentro de la partida). Es el único que soporta continuar
+    // literalmente donde lo dejaste, así que se intenta siempre primero.
+    if (typeof gameManager.getState === 'function') {
+      try {
+        const stateBytes = gameManager.getState();
+        const base64 = this._bytesToBase64(stateBytes);
+        await retroStorage.saveEmulatorState(this.currentGame.id, slot, base64, 'state');
+        await retroStorage.recordPlayed(this.currentGame.id, 100);
+        return true;
+      } catch (err) {
+        // No relanzamos todavía: para eso está el fallback de abajo.
+        // Pero SÍ se registra con detalle -- este catch es precisamente
+        // el que faltaba antes y dejaba el fallo invisible salvo con
+        // devtools abiertas.
+        saveVerifyError('getState() falló al guardar', this.currentGame.id, slot, err);
+      }
+    } else {
+      saveVerifyLog('gameManager.getState no existe en este core; se usa el fallback de SRAM directamente para', this.currentGame.id, slot);
+    }
+
+    // Fallback: partida guardada tipo pila/batería, vía cmd_savefiles +
+    // FS.readFile. No depende de Module.EmulatorJSGetState.
+    if (typeof gameManager.getSaveFile === 'function') {
+      try {
+        const saveBytes = gameManager.getSaveFile();
+        if (saveBytes && saveBytes.length) {
+          const base64 = this._bytesToBase64(saveBytes);
+          await retroStorage.saveEmulatorState(this.currentGame.id, slot, base64, 'sram');
+          await retroStorage.recordPlayed(this.currentGame.id, 100);
+          saveVerifyLog('Guardado como partida SRAM (fallback, sin snapshot completo) para', this.currentGame.id, slot);
+          this._notifyUser?.('Guardado el progreso de la partida guardada del juego (no la posición exacta en pantalla): este core no admite snapshots completos ahora mismo.');
+          return true;
+        }
+        saveVerifyError('getSaveFile() no devolvió datos (el juego no tiene partida guardada interna) para', this.currentGame.id, slot);
+      } catch (err) {
+        saveVerifyError('getSaveFile() también falló al guardar', this.currentGame.id, slot, err);
+      }
+    }
+
+    throw new Error('El emulador no pudo guardar la partida: ni el snapshot completo ni la partida guardada interna están disponibles para este core ahora mismo.');
   }
 
   async loadState(slot = 'auto') {
     if (!this.currentGame) throw new Error('No hay ningún juego activo.');
     const record = await retroStorage.loadEmulatorState(this.currentGame.id, slot);
     if (!record) throw new Error('No hay ninguna partida guardada para este juego.');
-    const instance = this.getEmulatorInstance();
-    if (instance?.gameManager?.loadState) {
-      const bytes = this._base64ToBytes(record.data);
-      instance.gameManager.loadState(bytes);
+    const instance = await this._waitForGameManager();
+    if (!instance) {
+      throw new Error('El emulador todavía no está listo para cargar.');
+    }
+    const gameManager = instance.gameManager;
+    const bytes = this._base64ToBytes(record.data);
+
+    // "kind" distingue snapshots completos (guardados con getState) de
+    // volcados de SRAM (guardados con el fallback getSaveFile). Los
+    // registros guardados antes de este fix no tienen "kind" -- se
+    // tratan como snapshot completo, su formato original.
+    if (record.kind === 'sram') {
+      if (typeof gameManager.loadSaveFiles !== 'function') {
+        throw new Error('Este core no puede restaurar la partida guardada (SRAM).');
+      }
+      gameManager.FS.writeFile(gameManager.getSaveFilePath(), bytes);
+      gameManager.loadSaveFiles();
+    } else if (typeof gameManager.loadState === 'function') {
+      gameManager.loadState(bytes);
+    } else {
+      throw new Error('Este core no puede restaurar partidas guardadas ahora mismo.');
     }
     return record;
+  }
+
+  // [SAVE-VERIFY] gameManager puede tardar en aparecer tras el arranque
+  // (mismo problema de timing ya documentado en
+  // _restorePendingAutoState, especialmente en cores pesados como PS1 o
+  // N64). Reintenta brevemente antes de rendirse, en vez de fallar a la
+  // primera comprobación como hacía el código anterior.
+  async _waitForGameManager(maxAttempts = 10, delayMs = 200) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const instance = this.getEmulatorInstance();
+      if (instance?.gameManager) return instance;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    return this.getEmulatorInstance()?.gameManager ? this.getEmulatorInstance() : null;
   }
 
   /**
@@ -856,7 +959,13 @@ class EmulatorController {
   // ---------------------------------------------------------------------
   async close({ autoSave = true } = {}) {
     const instance = this.getEmulatorInstance();
-    if (autoSave && this.currentGame && instance?.gameManager?.getState) {
+    // [SAVE-VERIFY] Antes se exigía además que gameManager.getState
+    // existiera como función para siquiera intentar el autosave -- pero
+    // getState() puede existir y aun así lanzar en tiempo de ejecución
+    // (ver el bloque de comentarios "BUG DEL VENDOR" en saveState()), y
+    // saveState() ahora ya sabe degradarse sola al fallback de SRAM. La
+    // única condición real para intentarlo es que gameManager exista.
+    if (autoSave && this.currentGame && instance?.gameManager) {
       const gameId = this.currentGame.id;
       try {
         await this.saveState('auto');
@@ -874,7 +983,7 @@ class EmulatorController {
         this._notifyUser?.('No se pudo guardar tu progreso al salir. Puedes intentar guardar manualmente con el botón de guardar antes de cerrar la próxima vez.');
       }
     } else if (autoSave && this.currentGame) {
-      saveVerifyLog('Autosave al cerrar omitido: el core no expone gameManager.getState para', this.currentGame.id);
+      saveVerifyLog('Autosave al cerrar omitido: el core no expone gameManager para', this.currentGame.id);
     }
     clearInterval(this._bootLogTimer);
     clearTimeout(this._startTimeout);
