@@ -100,6 +100,7 @@ class EmulatorController {
     this._romObjectUrls = new Set();
     this._romAssets = null;
     this._startTimeout = null;
+    this._pendingAutoState = null;
   }
 
   isSupported(consoleId) {
@@ -361,6 +362,21 @@ class EmulatorController {
       // UI interna del core, la ocultamos a nivel de contenedor y
       // forzamos el intento de arranque inmediato del contenido ya
       // cargado en cuanto el reproductor esté listo.
+      // "Quick Save"/"Quick Load" nativos de EmulatorJS llaman a
+      // gameManager.quickSave()/quickLoad() DIRECTAMENTE (escriben al
+      // filesystem virtual del core), sin pasar nunca por
+      // callEvent("saveState"/"loadState") -- es decir, sin pasar por
+      // EJS_onSaveState/EJS_onLoadState ni, por tanto, por retroStorage
+      // (IndexedDB). Una partida guardada así vive solo en la memoria
+      // WASM de ese iframe: se pierde en cuanto se cierra el juego, sin
+      // ningún aviso. Dejarlos visibles junto a los botones "Guardar/
+      // Cargar partida" de la topbar de RetroPlay (que sí persisten)
+      // es la receta perfecta para el síntoma "a veces parece que
+      // guarda, pero al volver no está" -- por eso se ocultan aquí.
+      // saveState/loadState nativos SÍ persisten correctamente (pasan
+      // por callEvent -> EJS_onSaveState/EJS_onLoadState -> retroStorage,
+      // ver más abajo), así que se dejan disponibles como alternativa a
+      // los de la topbar.
       iWin.EJS_Buttons = {
         playPause: false,
         restart: true,
@@ -375,8 +391,8 @@ class EmulatorController {
         volume: true,
         saveSavefiles: false,
         loadSavefiles: false,
-        quickSave: true,
-        quickLoad: true,
+        quickSave: false,
+        quickLoad: false,
         screenshot: false,
         cacheManager: false,
         exitEmulation: true
@@ -442,15 +458,62 @@ class EmulatorController {
         // (crítico en PS1, donde la descarga pesada del disco hace que las
         // dos vías nativas de EmulatorJS lleguen tarde o nunca).
         this._syncVirtualGamepad(this.getEmulatorInstance());
+        // Restauramos aquí (y no vía EJS_loadStateURL, ver el bloque de
+        // comentarios "BUG DEL VENDOR: EJS_loadStateURL" más abajo) el
+        // autosave de la partida anterior, si lo hay. gameManager ya
+        // existe de verdad en este punto, así que podemos llamar a
+        // loadState() directamente con los bytes -- el mismo camino que
+        // ya usan los botones "Guardar/Cargar partida" de la topbar,
+        // que sí funciona.
+        this._restorePendingAutoState();
         onReady?.();
         retroStorage.recordPlayed(game.id, 5);
       };
 
-      if (savedState && savedState.data) {
-        iWin.EJS_loadStateURL = this._base64ToBytes(savedState.data);
-      } else {
-        iWin.EJS_loadStateURL = null;
-      }
+      // ---------------------------------------------------------------
+      // BUG DEL VENDOR: EJS_loadStateURL
+      // ---------------------------------------------------------------
+      // EmulatorJS documenta EJS_loadStateURL como el mecanismo oficial
+      // para precargar un save-state al arrancar, y por su nombre (y por
+      // aceptar Uint8Array/ArrayBuffer/Blob además de string) parece
+      // pensado exactamente para nuestro caso: reinyectar el autosave
+      // guardado en IndexedDB.
+      //
+      // downloadStartState() (dentro de vendor/emulatorjs/emulator.min.js)
+      // encamina ese valor a través de this.downloadFile(...), y en
+      // cuanto esa promesa resuelve, registra -- vía this.on("start", cb)
+      // -- un listener adicional sobre el mismo evento "start" que ya
+      // dispara EJS_onGameStart. Ese listener hace, con 10ms de retraso:
+      //
+      //   this.gameManager.loadState(new Uint8Array(e.data.files[0].bytes))
+      //
+      // Esa forma `{ files: [{ bytes }] }` es la que produce
+      // this.downloader.downloadFile(...) para una URL real descargada y
+      // cacheada -- NUNCA la que produce pasar un Uint8Array ya en
+      // memoria (ahí downloadFile devuelve `{ data: <el propio
+      // Uint8Array> }`, sin `.files`), así que ese acceso revienta con
+      // "Cannot read properties of undefined (reading '0')".
+      //
+      // Verificado ejecutando el código real (no una reescritura) extraído
+      // de emulator.min.js: el juego SÍ arranca con normalidad y
+      // EJS_onGameStart SÍ se dispara -- el problema no es que el
+      // arranque se cuelgue, sino que, ~10ms después de arrancar, ese
+      // segundo listener revienta con una excepción no controlada
+      // (invisible salvo abriendo devtools) *antes* de llegar a la
+      // llamada a loadState(). Efecto observable: el autosave previo se
+      // ignora en silencio y la partida arranca siempre desde cero, sin
+      // ningún error visible para quien está jugando -- de ahí que
+      // "cargar partida" pareciera no hacer nada, para CUALQUIER juego
+      // que ya tuviera un progreso guardado.
+      //
+      // La solución: nunca usar EJS_loadStateURL con datos en memoria.
+      // Guardamos el save pendiente en this._pendingAutoState y lo
+      // restauramos manualmente en EJS_onGameStart (ver
+      // _restorePendingAutoState más abajo), llamando a
+      // gameManager.loadState() directamente -- el mismo método que
+      // usan con éxito los botones de topbar "Guardar/Cargar partida".
+      iWin.EJS_loadStateURL = null;
+      this._pendingAutoState = (savedState && savedState.data) ? savedState.data : null;
 
       await this._injectLoader(iDoc, iWin);
     } catch (err) {
@@ -547,6 +610,42 @@ class EmulatorController {
       // caso el gamepad se queda como estaba (comportamiento previo),
       // no algo peor.
       console.warn('[emulator] No se pudo sincronizar el gamepad virtual táctil', err);
+    }
+  }
+
+  /**
+   * Restaura, si existe, el autosave pendiente guardado en
+   * this._pendingAutoState (fijado en launch() a partir de lo que
+   * había en IndexedDB para este juego). Se llama desde
+   * EJS_onGameStart, que es el único punto donde gameManager.loadState
+   * ya es una función real -- llamarlo antes lanzaría "gameManager is
+   * undefined" o similar, igual que le pasaría a cualquier otro uso de
+   * gameManager hecho demasiado pronto.
+   *
+   * Usa el mismo camino que ya emplean con éxito los botones
+   * "Guardar/Cargar partida" de la topbar (instance.gameManager.
+   * loadState(bytes) directamente), evitando así el mecanismo roto de
+   * EJS_loadStateURL (ver el bloque de comentarios "BUG DEL VENDOR"
+   * en launch()).
+   */
+  _restorePendingAutoState() {
+    const base64 = this._pendingAutoState;
+    this._pendingAutoState = null;
+    if (!base64) return;
+
+    try {
+      const instance = this.getEmulatorInstance();
+      if (!instance?.gameManager?.loadState) {
+        console.warn('[emulator] El core no expone gameManager.loadState todavía; no se pudo restaurar el autosave.');
+        return;
+      }
+      const bytes = this._base64ToBytes(base64);
+      instance.gameManager.loadState(bytes);
+    } catch (err) {
+      // Un autosave corrupto o de un core/versión incompatible no debe
+      // impedir que la partida arranque -- el usuario simplemente
+      // empieza de cero, igual que si nunca hubiera habido autosave.
+      console.warn('[emulator] No se pudo restaurar el autosave previo; se continúa sin él', err);
     }
   }
 
@@ -688,6 +787,7 @@ class EmulatorController {
     clearInterval(this._bootLogTimer);
     clearTimeout(this._startTimeout);
     this._startTimeout = null;
+    this._pendingAutoState = null;
     this._releaseRomResources();
 
     // Destruir el iframe completo es la limpieza real: se lleva consigo
