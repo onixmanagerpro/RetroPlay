@@ -115,6 +115,15 @@ class EmulatorController {
     this._romAssets = null;
     this._startTimeout = null;
     this._pendingAutoState = null;
+    // [SAVE-VERIFY] Temporizador del autoguardado periódico mientras se
+    // juega -- ver _startPeriodicAutoSave/_stopPeriodicAutoSave. Antes
+    // el único momento en que se guardaba de verdad era al pulsar el
+    // botón "Salir del juego"; si el usuario cerraba la pestaña,
+    // recargaba, o navegaba fuera sin pasar por ese botón, el progreso
+    // de esa sesión nunca llegaba a persistirse -- ni el botón manual
+    // "Cargar partida" ni la tarjeta "Continuar jugando" tenían nada
+    // real que ofrecer la próxima vez.
+    this._periodicAutoSaveTimer = null;
   }
 
   isSupported(consoleId) {
@@ -503,6 +512,13 @@ class EmulatorController {
         // ya usan los botones "Guardar/Cargar partida" de la topbar,
         // que sí funciona.
         this._restorePendingAutoState();
+        // [SAVE-VERIFY] A partir de aquí, el progreso se autoguarda solo
+        // cada pocos minutos mientras se juega -- no solo al pulsar
+        // "Salir del juego". Así, si el usuario cierra la pestaña,
+        // recarga, o navega fuera sin usar ese botón, sigue habiendo una
+        // partida reciente real esperando la próxima vez que entre a
+        // este juego (ver _startPeriodicAutoSave).
+        this._startPeriodicAutoSave();
         onReady?.();
         retroStorage.recordPlayed(game.id, 5);
       };
@@ -994,9 +1010,66 @@ class EmulatorController {
   }
 
   // ---------------------------------------------------------------------
+  // Autoguardado periódico -- red de seguridad independiente del botón
+  // "Salir del juego"
+  // ---------------------------------------------------------------------
+  //
+  // [SAVE-VERIFY] Antes de esto, el único autoguardado real ocurría
+  // dentro de close({ autoSave: true }), es decir, solo cuando el
+  // usuario pulsaba el botón "Salir del juego" de la topbar. Cerrar la
+  // pestaña, recargar la página, o navegar a otra sección de RetroPlay
+  // sin pasar por ese botón dejaba el progreso de esa sesión sin
+  // guardar -- ni el botón manual "Cargar partida" ni la tarjeta
+  // "Continuar jugando" tenían nada real que restaurar la próxima vez,
+  // aunque el usuario recordara haber "guardado" (recordPlayed() marca
+  // el juego como jugado recientemente para esa tarjeta, pero eso no
+  // implica que exista un save state).
+  //
+  // _startPeriodicAutoSave() guarda cada _PERIODIC_AUTOSAVE_MS mientras
+  // el juego sigue activo, usando el mismo saveState('auto') que ya usa
+  // close() -- mismo camino, mismo fallback SRAM si el core lo necesita,
+  // mismo registro [SAVE-VERIFY] en caso de fallo. Un fallo puntual aquí
+  // NUNCA se muestra al usuario (igual que en close(), ver el comentario
+  // ahí): es un guardado en segundo plano sin acción explícita del
+  // usuario, así que un aviso en pantalla cada pocos minutos sería más
+  // ruido que ayuda. Si de verdad hay un problema de persistencia
+  // persistente, quedará registrado con el prefijo [SAVE-VERIFY] en
+  // consola en cada intento.
+  _startPeriodicAutoSave() {
+    this._stopPeriodicAutoSave();
+    const expectedGame = this.currentGame;
+    this._periodicAutoSaveTimer = setInterval(async () => {
+      // Guarda de concurrencia: si el juego cambió o se cerró desde que
+      // se programó este intervalo, no debe guardar nada -- el propio
+      // close()/launch() ya se encargan de parar y reiniciar el
+      // temporizador en los momentos correctos, pero un intervalo ya en
+      // vuelo (setInterval no se cancela instantáneamente) podría
+      // colarse una vez de más sin esta comprobación.
+      if (this.currentGame !== expectedGame || !this._active) {
+        this._stopPeriodicAutoSave();
+        return;
+      }
+      try {
+        await this.saveState('auto');
+        saveVerifyLog('Autoguardado periódico completado para', expectedGame && expectedGame.id);
+      } catch (err) {
+        saveVerifyError('Autoguardado periódico FALLÓ para', expectedGame && expectedGame.id, err);
+      }
+    }, EmulatorController._PERIODIC_AUTOSAVE_MS);
+  }
+
+  _stopPeriodicAutoSave() {
+    if (this._periodicAutoSaveTimer) {
+      clearInterval(this._periodicAutoSaveTimer);
+      this._periodicAutoSaveTimer = null;
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // Cierre / limpieza
   // ---------------------------------------------------------------------
   async close({ autoSave = true } = {}) {
+    this._stopPeriodicAutoSave();
     const instance = this.getEmulatorInstance();
     // [SAVE-VERIFY] Antes se exigía además que gameManager.getState
     // existiera como función para siquiera intentar el autosave -- pero
@@ -1049,5 +1122,44 @@ class EmulatorController {
   }
 }
 
+// [SAVE-VERIFY] Cada cuánto se autoguarda mientras se juega, en ms.
+// 3 minutos es un compromiso entre "no perder demasiado progreso" y
+// "no generar overhead/parones perceptibles" -- saveState() ya de por
+// sí puede tardar (getState() bloquea el hilo del core un instante) así
+// que un intervalo demasiado corto se notaría como micro-tirones.
+EmulatorController._PERIODIC_AUTOSAVE_MS = 3 * 60 * 1000;
+
 // Instancia global -- un único controlador de emulación activo a la vez.
 const emulatorController = new EmulatorController();
+
+// [SAVE-VERIFY] Red de seguridad final: si la pestaña se cierra, se
+// recarga, o el usuario navega fuera de RetroPlay mientras hay una
+// partida activa, se intenta un último guardado antes de que la página
+// desaparezca -- sin este listener, el único momento de guardado real
+// era pulsar "Salir del juego" dentro del emulador; cualquier otra
+// forma de irse (cerrar la pestaña, F5, gesto de "atrás" del sistema en
+// móvil) dejaba el progreso de esa sesión sin persistir en absoluto, sin
+// importar el autoguardado periódico si ocurría justo antes del
+// siguiente intervalo programado.
+//
+// pagehide (no beforeunload) porque: 1) beforeunload no se dispara de
+// forma fiable en navegadores móviles ni con el gesto de "atrás", que es
+// como la mayoría de usuarios abandonan una PWA/sitio en el móvil; 2)
+// pagehide es el evento recomendado actualmente para "el usuario se está
+// yendo" y funciona también con el bfcache. saveState() es asíncrono
+// (escribe en IndexedDB) y la página puede desaparecer antes de que
+// termine -- no hay garantía dura de que este guardado llegue a
+// completarse siempre, pero sí cubre la inmensa mayoría de salidas
+// reales, que es justo lo que faltaba.
+window.addEventListener('pagehide', () => {
+  if (!emulatorController._active || !emulatorController.currentGame) return;
+  const instance = emulatorController.getEmulatorInstance();
+  if (!instance?.gameManager) return;
+  saveVerifyLog('pagehide: intentando guardado final para', emulatorController.currentGame.id);
+  // No se puede await dentro de un listener de pagehide -- se dispara
+  // "en el mejor esfuerzo posible" antes de que el navegador continúe
+  // con la descarga de la página.
+  emulatorController.saveState('auto').catch((err) => {
+    saveVerifyError('pagehide: guardado final FALLÓ para', emulatorController.currentGame && emulatorController.currentGame.id, err);
+  });
+});
