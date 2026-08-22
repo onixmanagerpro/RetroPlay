@@ -291,8 +291,14 @@ class RetroPlayStorage {
   // Si la verificación falla, o si put() lanza una excepción, se cae a
   // localStorage como red de seguridad, y se registra el resultado en
   // ambos casos con el prefijo [SAVE-VERIFY] -- nunca en silencio.
-  async saveEmulatorState(gameId, slot, data) {
-    const record = { id: `${gameId}::${slot}`, gameId, slot, data, updatedAt: Date.now() };
+  async saveEmulatorState(gameId, slot, data, kind = 'state') {
+    // [SAVE-VERIFY] "kind" distingue un save-state completo ("state",
+    // snapshot exacto de memoria vía gameManager.getState()) de un
+    // volcado de partida guardada tipo pila/SRAM ("sram", vía
+    // gameManager.getSaveFile()) -- ver el fallback en emulator.js
+    // cuando el core no expone Module.EmulatorJSGetState. loadState()
+    // usa este campo para saber qué método de restauración aplicar.
+    const record = { id: `${gameId}::${slot}`, gameId, slot, data, kind, updatedAt: Date.now() };
     let indexedDbOk = false;
 
     try {
