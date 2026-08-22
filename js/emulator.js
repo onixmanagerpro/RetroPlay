@@ -550,7 +550,21 @@ class EmulatorController {
       // gameManager.loadState() directamente -- el mismo método que
       // usan con éxito los botones de topbar "Guardar/Cargar partida".
       iWin.EJS_loadStateURL = null;
-      this._pendingAutoState = (savedState && savedState.data) ? savedState.data : null;
+      // [SAVE-VERIFY] Se guarda el registro completo (data + kind), no
+      // solo el string base64: _restorePendingAutoState necesita saber
+      // si el autosave es un snapshot completo ("state", vía
+      // gameManager.getState()) o un volcado de SRAM ("sram", vía el
+      // fallback gameManager.getSaveFile()) para elegir el método de
+      // restauración correcto -- gameManager.loadState() para el
+      // primero, gameManager.loadSaveFiles() para el segundo. Antes solo
+      // se guardaba `.data` y se perdía `kind`, así que un autosave SRAM
+      // siempre se intentaba restaurar con loadState(), el método
+      // equivocado: o lanzaba una excepción ("datos incompatibles o
+      // corruptos") o dejaba el core en un estado inconsistente sin
+      // restaurar el progreso real. Registros guardados antes de este
+      // fix no tienen "kind" -- se tratan como snapshot completo, su
+      // formato original, igual que ya hace loadState().
+      this._pendingAutoState = savedState || null;
 
       await this._injectLoader(iDoc, iWin);
     } catch (err) {
@@ -686,40 +700,65 @@ class EmulatorController {
       return;
     }
 
-    const base64 = this._pendingAutoState;
-    if (!base64) {
+    // [SAVE-VERIFY] this._pendingAutoState ahora es el registro completo
+    // ({ data, kind, ... }) guardado en launch(), no solo el string
+    // base64 -- ver el comentario en launch() para el porqué. "kind" se
+    // trata exactamente igual que en loadState(): los registros previos
+    // a este fix no lo tienen y se tratan como snapshot completo, su
+    // formato original.
+    const pending = this._pendingAutoState;
+    if (!pending || !pending.data) {
       saveVerifyLog('No hay autosave pendiente que restaurar para', this.currentGame && this.currentGame.id);
       return;
     }
+    const base64 = pending.data;
+    const kind = pending.kind;
 
     const instance = this.getEmulatorInstance();
-    if (!instance?.gameManager?.loadState) {
+    // [SAVE-VERIFY] Qué método necesitamos disponible depende de "kind":
+    // loadState para un snapshot completo, loadSaveFiles (+ FS) para un
+    // volcado de SRAM. Antes solo se comprobaba gameManager.loadState,
+    // así que un core que aún no hubiera expuesto loadSaveFiles/FS podía
+    // "pasar" esta comprobación y fallar después, dentro del bloque
+    // try/catch de más abajo -- correcto en el resultado final, pero
+    // sin aprovechar el backoff/reintento pensado para timing.
+    const methodReady = kind === 'sram'
+      ? !!(instance?.gameManager?.loadSaveFiles && instance?.gameManager?.FS)
+      : !!instance?.gameManager?.loadState;
+
+    if (!methodReady) {
       if (attempt >= 10) {
         // Tras ~2s de reintentos (10 x 200ms) el core sigue sin exponer
-        // loadState: esto ya no es un problema de timing, es un core que
-        // realmente no soporta save states o falló al inicializar.
+        // el método necesario: esto ya no es un problema de timing, es
+        // un core que realmente no soporta save states o falló al
+        // inicializar.
         this._pendingAutoState = null;
-        saveVerifyError('gameManager.loadState nunca quedó disponible tras', attempt, 'intentos; SE PIERDE el autosave pendiente para', this.currentGame && this.currentGame.id);
+        saveVerifyError('gameManager no expuso el método necesario (kind=', kind || 'state', ') tras', attempt, 'intentos; SE PIERDE el autosave pendiente para', this.currentGame && this.currentGame.id);
         this._notifyUser?.('No se pudo restaurar tu partida guardada: el emulador no respondió a tiempo.');
         return;
       }
-      saveVerifyLog('gameManager.loadState todavía no disponible (intento', attempt + 1, 'de 10); reintentando en 200ms');
+      saveVerifyLog('gameManager todavía no expone el método necesario (kind=', kind || 'state', ') (intento', attempt + 1, 'de 10); reintentando en 200ms');
       setTimeout(() => this._restorePendingAutoState(attempt + 1, expectedGame), 200);
       return;
     }
 
     try {
       const bytes = this._base64ToBytes(base64);
-      instance.gameManager.loadState(bytes);
+      if (kind === 'sram') {
+        instance.gameManager.FS.writeFile(instance.gameManager.getSaveFilePath(), bytes);
+        instance.gameManager.loadSaveFiles();
+      } else {
+        instance.gameManager.loadState(bytes);
+      }
       this._pendingAutoState = null;
-      saveVerifyLog('Autosave restaurado con éxito para', this.currentGame && this.currentGame.id, `(${bytes.length} bytes)`);
+      saveVerifyLog('Autosave restaurado con éxito para', this.currentGame && this.currentGame.id, `(${bytes.length} bytes, kind=${kind || 'state'})`);
     } catch (err) {
       // Un autosave corrupto o de un core/versión incompatible no debe
       // impedir que la partida arranque -- el usuario empieza de cero,
       // pero AHORA se le informa explícitamente de que eso ha pasado, en
       // vez de asumir en silencio que todo fue bien.
       this._pendingAutoState = null;
-      saveVerifyError('loadState() lanzó una excepción al restaurar el autosave de', this.currentGame && this.currentGame.id, err);
+      saveVerifyError('La restauración del autosave (kind=', kind || 'state', ') lanzó una excepción para', this.currentGame && this.currentGame.id, err);
       this._notifyUser?.('No se pudo restaurar tu partida guardada (datos incompatibles o corruptos). Se ha empezado una partida nueva.');
     }
   }
@@ -971,16 +1010,19 @@ class EmulatorController {
         await this.saveState('auto');
         saveVerifyLog('Autosave al cerrar completado para', gameId);
       } catch (err) {
-        // [SAVE-VERIFY] Antes este catch estaba vacío: si getState()
-        // lanzaba (core ya parcialmente destruido, WASM en mal estado
-        // tras un crash) o si saveEmulatorState() no lograba persistir
-        // en ningún motor, el usuario cerraba el juego creyendo que se
-        // había guardado y en realidad no había pasado nada -- sin
-        // ningún indicio salvo abrir devtools. Ahora se registra
-        // siempre y se avisa al usuario, en vez de fallar en silencio
-        // justo en el momento más crítico (el cierre del juego).
+        // [SAVE-VERIFY] Se registra siempre en consola para poder
+        // depurar un fallo real de guardado. Deliberadamente NO se
+        // avisa al usuario aquí (a diferencia de los demás usos de
+        // _notifyUser en este archivo): el autosave al cerrar se
+        // dispara en cada salida, incluso cuando el jugador no ha
+        // generado progreso nuevo desde el último guardado (p.ej. abrir
+        // el juego y cerrarlo enseguida, o un core sin guardado interno
+        // para ese título) -- avisar en esos casos es un falso positivo
+        // que entrena al usuario a ignorar el aviso, justo cuando sí
+        // importa (ver _notifyUser en saveState/loadState, que sí
+        // avisan porque corresponden a una acción explícita del
+        // usuario: pulsar "Guardar" o "Cargar").
         saveVerifyError('Autosave al cerrar FALLÓ para', gameId, err);
-        this._notifyUser?.('No se pudo guardar tu progreso al salir. Puedes intentar guardar manualmente con el botón de guardar antes de cerrar la próxima vez.');
       }
     } else if (autoSave && this.currentGame) {
       saveVerifyLog('Autosave al cerrar omitido: el core no expone gameManager para', this.currentGame.id);
