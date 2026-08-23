@@ -890,7 +890,14 @@ input, select { font-family: inherit; }
    FICHA DE JUEGO (modal)
    ========================================================= */
 .modal-backdrop {
-  position: fixed; inset: 0; z-index: 300;
+  /* z-index 450: por ENCIMA de .emulator-view (400). Con 300 (por debajo
+     del emulador) este modal se abría igualmente -- is-open, opacity:1,
+     pointer-events:auto -- pero quedaba tapado por el emulador mientras
+     estaba abierto, así que "Guardar partida" / "Cargar partida" (y el
+     login) parecían no hacer nada durante la partida y solo se veían al
+     cerrar el emulador, momento en el que ya no hay juego activo que
+     guardar. Ver también emulator-close/closeEmulator en app.js. */
+  position: fixed; inset: 0; z-index: 450;
   background: rgba(6, 8, 12, 0.75);
   backdrop-filter: blur(6px);
   display: flex; align-items: center; justify-content: center;
@@ -971,6 +978,9 @@ input, select { font-family: inherit; }
    EMULADOR
    ========================================================= */
 .emulator-view {
+  /* z-index 400: por debajo de .modal-backdrop (450) a propósito, para
+     que "Guardar partida" / "Cargar partida" / login puedan abrirse por
+     encima del emulador mientras la partida sigue activa. */
   position: fixed; inset: 0; z-index: 400;
   background: #000;
   display: flex; flex-direction: column;
