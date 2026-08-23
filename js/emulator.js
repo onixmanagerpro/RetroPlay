@@ -114,16 +114,10 @@ class EmulatorController {
     this._romObjectUrls = new Set();
     this._romAssets = null;
     this._startTimeout = null;
-    this._pendingAutoState = null;
-    // [SAVE-VERIFY] Temporizador del autoguardado periódico mientras se
-    // juega -- ver _startPeriodicAutoSave/_stopPeriodicAutoSave. Antes
-    // el único momento en que se guardaba de verdad era al pulsar el
-    // botón "Salir del juego"; si el usuario cerraba la pestaña,
-    // recargaba, o navegaba fuera sin pasar por ese botón, el progreso
-    // de esa sesión nunca llegaba a persistirse -- ni el botón manual
-    // "Cargar partida" ni la tarjeta "Continuar jugando" tenían nada
-    // real que ofrecer la próxima vez.
-    this._periodicAutoSaveTimer = null;
+    // No hay autosave de ningún tipo: guardar y cargar son siempre
+    // acciones explícitas del usuario a través de saveState(name) /
+    // loadState(saveId), con nombre elegido por él y persistidas en
+    // Firebase (ver storage.js).
   }
 
   isSupported(consoleId) {
@@ -244,7 +238,7 @@ class EmulatorController {
     // Esto es lo que garantiza que loader.js nunca se ejecute dos veces
     // en el mismo scope global.
     if (this._active) {
-      await this.close({ autoSave: true });
+      await this.close();
     }
 
     this._active = true;
@@ -258,9 +252,11 @@ class EmulatorController {
     hostEl.innerHTML = '';
 
     try {
-      // Intentamos recuperar un save-state automático previo (autosave
-      // al salir del juego la última vez) para ofrecer continuidad.
-      const savedState = await retroStorage.loadEmulatorState(game.id, 'auto');
+      // El progreso ya NO se recupera automáticamente al lanzar el juego:
+      // el único mecanismo de guardado/carga es el par de botones
+      // "Guardar partida" / "Cargar partida" de la topbar, con nombre
+      // elegido por el usuario (ver saveState()/loadState() más abajo y
+      // storage.js). No hay autosave.
       if (loadAbortController.signal.aborted || !this._active || this.currentGame !== game) return;
 
       const iframe = document.createElement('iframe');
@@ -393,8 +389,8 @@ class EmulatorController {
       // sin depender de qué haya en el navegador de cada persona. Solo
       // afecta a un puñado de ajustes internos del propio reproductor
       // (hilos, menú, rebobinado, rotación de vídeo) que RetroPlay ya fija
-      // explícitamente vía EJS_Buttons/EJS_* -- no toca las partidas
-      // guardadas, que viven aparte en IndexedDB vía retroStorage.
+      // explícitamente vía EJS_Buttons/EJS_* -- las partidas guardadas
+      // viven exclusivamente en Firebase vía retroStorage, no aquí.
       iWin.EJS_disableLocalStorage = true;
       iWin.EJS_defaultOptions = { webgl2Enabled: 'enabled' };
 
@@ -408,37 +404,15 @@ class EmulatorController {
       // UI interna del core, la ocultamos a nivel de contenedor y
       // forzamos el intento de arranque inmediato del contenido ya
       // cargado en cuanto el reproductor esté listo.
-      // "Quick Save"/"Quick Load" nativos de EmulatorJS llaman a
-      // gameManager.quickSave()/quickLoad() DIRECTAMENTE (escriben al
-      // filesystem virtual del core), sin pasar nunca por
-      // callEvent("saveState"/"loadState") -- es decir, sin pasar por
-      // EJS_onSaveState/EJS_onLoadState ni, por tanto, por retroStorage
-      // (IndexedDB). Una partida guardada así vive solo en la memoria
-      // WASM de ese iframe: se pierde en cuanto se cierra el juego, sin
-      // ningún aviso. Dejarlos visibles junto a los botones "Guardar/
-      // Cargar partida" de la topbar de RetroPlay (que sí persisten)
-      // es la receta perfecta para el síntoma "a veces parece que
-      // guarda, pero al volver no está" -- por eso se ocultan aquí.
-      //
-      // [BUG] Lo mismo aplica a "Export Save File"/"Import Save File"
-      // (descargan/suben a mano un .srm suelto, también sin pasar por
-      // retroStorage): estaban puestos a false como "saveSavefiles"/
-      // "loadSavefiles", pero las claves reales que usa EmulatorJS son
-      // "saveSavFiles"/"loadSavFiles" (con F mayúscula y sin la "e" --
-      // ver defaultButtonOptions en vendor/emulatorjs/emulator.min.js).
-      // buildButtonOptions() no reconoce una clave que no existe ni
-      // tiene alias (a diferencia de "volume", que sí es un alias real
-      // de "volumeSlider") y la descarta en silencio, sin ningún error
-      // en consola -- así que estos dos botones se quedaban con su
-      // valor por defecto (visible) pese a la intención clara de
-      // ocultarlos. Corregido abajo.
-      //
-      // saveState/loadState nativos SÍ persisten correctamente (pasan
-      // por callEvent -> EJS_onSaveState/EJS_onLoadState -> retroStorage,
-      // ver más abajo), pero para que exista una única vía de guardado/
-      // carga -- los botones "Guardar partida"/"Cargar partida" de la
-      // topbar de RetroPlay -- se ocultan también aquí en vez de
-      // dejarlos como alternativa.
+      // TODOS los mecanismos nativos de guardado/carga de EmulatorJS
+      // (saveState, loadState, quickSave, quickLoad, save/loadSavefiles)
+      // se ocultan sin excepción. La única forma de guardar o cargar una
+      // partida en RetroPlay son los dos botones de la topbar propia
+      // ("Guardar partida" / "Cargar partida"), que piden un nombre y
+      // pasan por retroStorage -> Firebase. Cualquier otro camino nativo
+      // (quickSave escribe al filesystem virtual del core sin pasar por
+      // retroStorage) se pierde al cerrar el juego sin aviso, así que se
+      // elimina por completo de la interfaz.
       iWin.EJS_Buttons = {
         playPause: false,
         restart: true,
@@ -451,8 +425,8 @@ class EmulatorController {
         gamepad: true,
         cheat: false,
         volume: true,
-        saveSavFiles: false,
-        loadSavFiles: false,
+        saveSavefiles: false,
+        loadSavefiles: false,
         quickSave: false,
         quickLoad: false,
         screenshot: false,
@@ -493,23 +467,15 @@ class EmulatorController {
       this._startTimeout = setTimeout(() => {
         if (this._active && this.currentGame === game) {
           onError?.('El archivo de este juego no es un disco de PS1 válido (.bin/.cue/.iso), así que el núcleo no pudo arrancarlo automáticamente. Sustituye el archivo en /games/ps1/ por una imagen de disco real.');
-          this.close({ autoSave: false });
+          this.close();
         }
       }, startTimeoutMs);
 
-      // Guardado automático de partidas: cuando EmulatorJS detecta un
-      // cambio en la memoria persistente del juego, lo reflejamos en
-      // IndexedDB vía storage.js -- así "Continuar jugando" siempre
-      // tiene el último progreso real.
-      iWin.EJS_onSaveState = (e) => this._handleSaveStateEvent(e);
-      // Sin este handler, EmulatorJS considera que nadie está escuchando el
-      // evento "loadState" (callEvent("loadState") devuelve 0) y cae a su
-      // flujo nativo: abre el selector de archivos del sistema operativo
-      // dentro del iframe y no reporta nada si el usuario no completa esa
-      // selección -- de ahí que "cargar" pareciera no hacer nada. Con este
-      // handler, el botón nativo de cargar usa el mismo autosave que ya
-      // gestiona retroStorage, igual que ya hace el guardado.
-      iWin.EJS_onLoadState = () => { this.loadState('manual').catch(() => {}); };
+      // No se registran EJS_onSaveState / EJS_onLoadState: los botones
+      // nativos que los disparan están desactivados en EJS_Buttons. El
+      // único guardado/carga posible es el manual, por nombre, vía los
+      // botones propios de la topbar (ver saveState()/loadState() más
+      // abajo).
       iWin.EJS_onGameStart = () => {
         clearTimeout(this._startTimeout);
         this._startTimeout = null;
@@ -520,83 +486,15 @@ class EmulatorController {
         // (crítico en PS1, donde la descarga pesada del disco hace que las
         // dos vías nativas de EmulatorJS lleguen tarde o nunca).
         this._syncVirtualGamepad(this.getEmulatorInstance());
-        // Restauramos aquí (y no vía EJS_loadStateURL, ver el bloque de
-        // comentarios "BUG DEL VENDOR: EJS_loadStateURL" más abajo) el
-        // autosave de la partida anterior, si lo hay. gameManager ya
-        // existe de verdad en este punto, así que podemos llamar a
-        // loadState() directamente con los bytes -- el mismo camino que
-        // ya usan los botones "Guardar/Cargar partida" de la topbar,
-        // que sí funciona.
-        this._restorePendingAutoState();
-        // [SAVE-VERIFY] A partir de aquí, el progreso se autoguarda solo
-        // cada pocos minutos mientras se juega -- no solo al pulsar
-        // "Salir del juego". Así, si el usuario cierra la pestaña,
-        // recarga, o navega fuera sin usar ese botón, sigue habiendo una
-        // partida reciente real esperando la próxima vez que entre a
-        // este juego (ver _startPeriodicAutoSave).
-        this._startPeriodicAutoSave();
         onReady?.();
         retroStorage.recordPlayed(game.id, 5);
       };
 
-      // ---------------------------------------------------------------
-      // BUG DEL VENDOR: EJS_loadStateURL
-      // ---------------------------------------------------------------
-      // EmulatorJS documenta EJS_loadStateURL como el mecanismo oficial
-      // para precargar un save-state al arrancar, y por su nombre (y por
-      // aceptar Uint8Array/ArrayBuffer/Blob además de string) parece
-      // pensado exactamente para nuestro caso: reinyectar el autosave
-      // guardado en IndexedDB.
-      //
-      // downloadStartState() (dentro de vendor/emulatorjs/emulator.min.js)
-      // encamina ese valor a través de this.downloadFile(...), y en
-      // cuanto esa promesa resuelve, registra -- vía this.on("start", cb)
-      // -- un listener adicional sobre el mismo evento "start" que ya
-      // dispara EJS_onGameStart. Ese listener hace, con 10ms de retraso:
-      //
-      //   this.gameManager.loadState(new Uint8Array(e.data.files[0].bytes))
-      //
-      // Esa forma `{ files: [{ bytes }] }` es la que produce
-      // this.downloader.downloadFile(...) para una URL real descargada y
-      // cacheada -- NUNCA la que produce pasar un Uint8Array ya en
-      // memoria (ahí downloadFile devuelve `{ data: <el propio
-      // Uint8Array> }`, sin `.files`), así que ese acceso revienta con
-      // "Cannot read properties of undefined (reading '0')".
-      //
-      // Verificado ejecutando el código real (no una reescritura) extraído
-      // de emulator.min.js: el juego SÍ arranca con normalidad y
-      // EJS_onGameStart SÍ se dispara -- el problema no es que el
-      // arranque se cuelgue, sino que, ~10ms después de arrancar, ese
-      // segundo listener revienta con una excepción no controlada
-      // (invisible salvo abriendo devtools) *antes* de llegar a la
-      // llamada a loadState(). Efecto observable: el autosave previo se
-      // ignora en silencio y la partida arranca siempre desde cero, sin
-      // ningún error visible para quien está jugando -- de ahí que
-      // "cargar partida" pareciera no hacer nada, para CUALQUIER juego
-      // que ya tuviera un progreso guardado.
-      //
-      // La solución: nunca usar EJS_loadStateURL con datos en memoria.
-      // Guardamos el save pendiente en this._pendingAutoState y lo
-      // restauramos manualmente en EJS_onGameStart (ver
-      // _restorePendingAutoState más abajo), llamando a
-      // gameManager.loadState() directamente -- el mismo método que
-      // usan con éxito los botones de topbar "Guardar/Cargar partida".
+      // No se usa EJS_loadStateURL: no hay ningún autosave que precargar
+      // al arrancar. Cargar una partida es siempre una acción explícita
+      // del usuario a través del botón "Cargar partida" (ver loadState()
+      // más abajo), nunca algo automático al lanzar el juego.
       iWin.EJS_loadStateURL = null;
-      // [SAVE-VERIFY] Se guarda el registro completo (data + kind), no
-      // solo el string base64: _restorePendingAutoState necesita saber
-      // si el autosave es un snapshot completo ("state", vía
-      // gameManager.getState()) o un volcado de SRAM ("sram", vía el
-      // fallback gameManager.getSaveFile()) para elegir el método de
-      // restauración correcto -- gameManager.loadState() para el
-      // primero, gameManager.loadSaveFiles() para el segundo. Antes solo
-      // se guardaba `.data` y se perdía `kind`, así que un autosave SRAM
-      // siempre se intentaba restaurar con loadState(), el método
-      // equivocado: o lanzaba una excepción ("datos incompatibles o
-      // corruptos") o dejaba el core en un estado inconsistente sin
-      // restaurar el progreso real. Registros guardados antes de este
-      // fix no tienen "kind" -- se tratan como snapshot completo, su
-      // formato original, igual que ya hace loadState().
-      this._pendingAutoState = savedState || null;
 
       await this._injectLoader(iDoc, iWin);
     } catch (err) {
@@ -605,7 +503,7 @@ class EmulatorController {
       }
       console.error('[emulator] Error al iniciar', err);
       clearInterval(this._bootLogTimer);
-      await this.close({ autoSave: false });
+      await this.close();
       onError?.(err.message || 'No se pudo iniciar el emulador. Comprueba tu conexión e inténtalo de nuevo.');
     }
   }
@@ -696,105 +594,6 @@ class EmulatorController {
     }
   }
 
-  /**
-   * Restaura, si existe, el autosave pendiente guardado en
-   * this._pendingAutoState (fijado en launch() a partir de lo que
-   * había en IndexedDB para este juego). Se llama desde
-   * EJS_onGameStart, que es el único punto donde gameManager.loadState
-   * ya es una función real -- llamarlo antes lanzaría "gameManager is
-   * undefined" o similar, igual que le pasaría a cualquier otro uso de
-   * gameManager hecho demasiado pronto.
-   *
-   * Usa el mismo camino que ya emplean con éxito los botones
-   * "Guardar/Cargar partida" de la topbar (instance.gameManager.
-   * loadState(bytes) directamente), evitando así el mecanismo roto de
-   * EJS_loadStateURL (ver el bloque de comentarios "BUG DEL VENDOR"
-   * en launch()).
-   */
-  // [SAVE-VERIFY] Reintenta la restauración varias veces con backoff
-  // corto antes de rendirse. En cores pesados (PS1, N64) gameManager
-  // puede tardar en exponer loadState incluso DESPUÉS de que
-  // EJS_onGameStart se dispare -- el disparo del evento no garantiza que
-  // el core interno ya haya terminado de inicializar sus estructuras de
-  // guardado. El código anterior se rendía a la primera comprobación
-  // fallida, lo que producía el mismo síntoma exacto que "cargar no hace
-  // nada": el autosave existía, pero se descartaba por llegar demasiado
-  // pronto.
-  _restorePendingAutoState(attempt = 0, expectedGame = this.currentGame) {
-    // [SAVE-VERIFY] Guarda de concurrencia: si el juego se cerró o se
-    // cambió por otro mientras un reintento estaba en curso (setTimeout
-    // pendiente de una llamada anterior), este reintento pertenece a una
-    // partida que ya no está activa y debe abortar sin tocar nada -- de
-    // lo contrario podría interferir con el _pendingAutoState de la
-    // partida NUEVA que el usuario haya abierto entre medias.
-    if (this.currentGame !== expectedGame) {
-      saveVerifyLog('Reintento de restauración abortado: la partida cambió mientras se reintentaba');
-      return;
-    }
-
-    // [SAVE-VERIFY] this._pendingAutoState ahora es el registro completo
-    // ({ data, kind, ... }) guardado en launch(), no solo el string
-    // base64 -- ver el comentario en launch() para el porqué. "kind" se
-    // trata exactamente igual que en loadState(): los registros previos
-    // a este fix no lo tienen y se tratan como snapshot completo, su
-    // formato original.
-    const pending = this._pendingAutoState;
-    if (!pending || !pending.data) {
-      saveVerifyLog('No hay autosave pendiente que restaurar para', this.currentGame && this.currentGame.id);
-      return;
-    }
-    const base64 = pending.data;
-    const kind = pending.kind;
-
-    const instance = this.getEmulatorInstance();
-    // [SAVE-VERIFY] Qué método necesitamos disponible depende de "kind":
-    // loadState para un snapshot completo, loadSaveFiles (+ FS) para un
-    // volcado de SRAM. Antes solo se comprobaba gameManager.loadState,
-    // así que un core que aún no hubiera expuesto loadSaveFiles/FS podía
-    // "pasar" esta comprobación y fallar después, dentro del bloque
-    // try/catch de más abajo -- correcto en el resultado final, pero
-    // sin aprovechar el backoff/reintento pensado para timing.
-    const methodReady = kind === 'sram'
-      ? !!(instance?.gameManager?.loadSaveFiles && instance?.gameManager?.FS)
-      : !!instance?.gameManager?.loadState;
-
-    if (!methodReady) {
-      if (attempt >= 10) {
-        // Tras ~2s de reintentos (10 x 200ms) el core sigue sin exponer
-        // el método necesario: esto ya no es un problema de timing, es
-        // un core que realmente no soporta save states o falló al
-        // inicializar.
-        this._pendingAutoState = null;
-        saveVerifyError('gameManager no expuso el método necesario (kind=', kind || 'state', ') tras', attempt, 'intentos; SE PIERDE el autosave pendiente para', this.currentGame && this.currentGame.id);
-        this._notifyUser?.('No se pudo restaurar tu partida guardada: el emulador no respondió a tiempo.');
-        return;
-      }
-      saveVerifyLog('gameManager todavía no expone el método necesario (kind=', kind || 'state', ') (intento', attempt + 1, 'de 10); reintentando en 200ms');
-      setTimeout(() => this._restorePendingAutoState(attempt + 1, expectedGame), 200);
-      return;
-    }
-
-    try {
-      const bytes = this._base64ToBytes(base64);
-      if (kind === 'sram') {
-        instance.gameManager.FS.writeFile(instance.gameManager.getSaveFilePath(), bytes);
-        instance.gameManager.loadSaveFiles();
-      } else {
-        instance.gameManager.loadState(bytes);
-      }
-      this._pendingAutoState = null;
-      saveVerifyLog('Autosave restaurado con éxito para', this.currentGame && this.currentGame.id, `(${bytes.length} bytes, kind=${kind || 'state'})`);
-    } catch (err) {
-      // Un autosave corrupto o de un core/versión incompatible no debe
-      // impedir que la partida arranque -- el usuario empieza de cero,
-      // pero AHORA se le informa explícitamente de que eso ha pasado, en
-      // vez de asumir en silencio que todo fue bien.
-      this._pendingAutoState = null;
-      saveVerifyError('La restauración del autosave (kind=', kind || 'state', ') lanzó una excepción para', this.currentGame && this.currentGame.id, err);
-      this._notifyUser?.('No se pudo restaurar tu partida guardada (datos incompatibles o corruptos). Se ha empezado una partida nueva.');
-    }
-  }
-
   _runBootSequence(onBootMessage) {
     let i = 0;
     onBootMessage?.(BOOT_MESSAGES[0]);
@@ -823,18 +622,6 @@ class EmulatorController {
     });
   }
 
-  async _handleSaveStateEvent(e) {
-    if (!this.currentGame || !e) return;
-    try {
-      const bytes = e.state || e;
-      const base64 = this._bytesToBase64(new Uint8Array(bytes));
-      await retroStorage.saveEmulatorState(this.currentGame.id, 'auto', base64);
-      await retroStorage.recordPlayed(this.currentGame.id, 60);
-    } catch (err) {
-      console.warn('[emulator] No se pudo persistir el save state automático', err);
-    }
-  }
-
   // ---------------------------------------------------------------------
   // Guardado / carga manual de partidas -- botones de la topbar
   // ---------------------------------------------------------------------
@@ -853,9 +640,7 @@ class EmulatorController {
   // síntoma de raíz para otro core), la llamada revienta con
   // "this.Module.EmulatorJSGetState is not a function" para CUALQUIER
   // juego de esa consola, siempre -- no es un fallo intermitente ni de
-  // timing (por eso reintentar getState() sin más no sirve de nada, a
-  // diferencia del backoff que sí tiene sentido para loadState en
-  // _restorePendingAutoState).
+  // timing (por eso reintentar getState() sin más no sirve de nada).
   //
   // Como RetroPlay vendoriza emulator.min.js localmente pero sirve los
   // binarios de cada core en vivo desde CORE_DATA_CDN, no controlamos
@@ -871,8 +656,16 @@ class EmulatorController {
   // frame), pero para cualquier juego con guardado interno (la inmensa
   // mayoría de Mega Drive/SNES/N64 con batería) SÍ persiste el progreso
   // real del jugador, en vez de dejar el guardado completamente roto.
-  async saveState(slot = 'auto') {
+  /**
+   * Guarda la partida actual en Firebase con el nombre elegido por el
+   * usuario (p.ej. "partida naves 1"), como una entrada más de su
+   * "memory card" personal ligada a su cuenta. Es el ÚNICO mecanismo de
+   * guardado de RetroPlay -- lo dispara el botón "Guardar partida" de la
+   * topbar, que pide el nombre antes de llamar aquí.
+   */
+  async saveState(name) {
     if (!this.currentGame) throw new Error('No hay ningún juego activo.');
+    if (!name || !name.trim()) throw new Error('La partida necesita un nombre.');
     const instance = await this._waitForGameManager();
     if (!instance) {
       throw new Error('El emulador todavía no está listo para guardar.');
@@ -886,18 +679,18 @@ class EmulatorController {
       try {
         const stateBytes = gameManager.getState();
         const base64 = this._bytesToBase64(stateBytes);
-        await retroStorage.saveEmulatorState(this.currentGame.id, slot, base64, 'state');
+        const record = await retroStorage.saveEmulatorState(this.currentGame, name, base64, 'state');
         await retroStorage.recordPlayed(this.currentGame.id, 100);
-        return true;
+        return record;
       } catch (err) {
         // No relanzamos todavía: para eso está el fallback de abajo.
         // Pero SÍ se registra con detalle -- este catch es precisamente
         // el que faltaba antes y dejaba el fallo invisible salvo con
         // devtools abiertas.
-        saveVerifyError('getState() falló al guardar', this.currentGame.id, slot, err);
+        saveVerifyError('getState() falló al guardar', this.currentGame.id, name, err);
       }
     } else {
-      saveVerifyLog('gameManager.getState no existe en este core; se usa el fallback de SRAM directamente para', this.currentGame.id, slot);
+      saveVerifyLog('gameManager.getState no existe en este core; se usa el fallback de SRAM directamente para', this.currentGame.id, name);
     }
 
     // Fallback: partida guardada tipo pila/batería, vía cmd_savefiles +
@@ -907,25 +700,32 @@ class EmulatorController {
         const saveBytes = gameManager.getSaveFile();
         if (saveBytes && saveBytes.length) {
           const base64 = this._bytesToBase64(saveBytes);
-          await retroStorage.saveEmulatorState(this.currentGame.id, slot, base64, 'sram');
+          const record = await retroStorage.saveEmulatorState(this.currentGame, name, base64, 'sram');
           await retroStorage.recordPlayed(this.currentGame.id, 100);
-          saveVerifyLog('Guardado como partida SRAM (fallback, sin snapshot completo) para', this.currentGame.id, slot);
+          saveVerifyLog('Guardado como partida SRAM (fallback, sin snapshot completo) para', this.currentGame.id, name);
           this._notifyUser?.('Guardado el progreso de la partida guardada del juego (no la posición exacta en pantalla): este core no admite snapshots completos ahora mismo.');
-          return true;
+          return record;
         }
-        saveVerifyError('getSaveFile() no devolvió datos (el juego no tiene partida guardada interna) para', this.currentGame.id, slot);
+        saveVerifyError('getSaveFile() no devolvió datos (el juego no tiene partida guardada interna) para', this.currentGame.id, name);
       } catch (err) {
-        saveVerifyError('getSaveFile() también falló al guardar', this.currentGame.id, slot, err);
+        saveVerifyError('getSaveFile() también falló al guardar', this.currentGame.id, name, err);
       }
     }
 
     throw new Error('El emulador no pudo guardar la partida: ni el snapshot completo ni la partida guardada interna están disponibles para este core ahora mismo.');
   }
 
-  async loadState(slot = 'auto') {
+  /**
+   * Carga una partida previamente guardada en Firebase a partir de su
+   * identificador (id del documento en Firestore, ver storage.js). Es el
+   * ÚNICO mecanismo de carga de RetroPlay -- lo dispara el botón "Cargar
+   * partida" de la topbar, tras elegir el usuario un nombre de su lista.
+   */
+  async loadState(saveId) {
     if (!this.currentGame) throw new Error('No hay ningún juego activo.');
-    const record = await retroStorage.loadEmulatorState(this.currentGame.id, slot);
-    if (!record) throw new Error('No hay ninguna partida guardada para este juego.');
+    if (!saveId) throw new Error('No se indicó qué partida cargar.');
+    const record = await retroStorage.loadEmulatorState(saveId);
+    if (!record) throw new Error('No se encontró esa partida guardada.');
     const instance = await this._waitForGameManager();
     if (!instance) {
       throw new Error('El emulador todavía no está listo para cargar.');
@@ -934,9 +734,7 @@ class EmulatorController {
     const bytes = this._base64ToBytes(record.data);
 
     // "kind" distingue snapshots completos (guardados con getState) de
-    // volcados de SRAM (guardados con el fallback getSaveFile). Los
-    // registros guardados antes de este fix no tienen "kind" -- se
-    // tratan como snapshot completo, su formato original.
+    // volcados de SRAM (guardados con el fallback getSaveFile).
     if (record.kind === 'sram') {
       if (typeof gameManager.loadSaveFiles !== 'function') {
         throw new Error('Este core no puede restaurar la partida guardada (SRAM).');
@@ -951,11 +749,9 @@ class EmulatorController {
     return record;
   }
 
-  // [SAVE-VERIFY] gameManager puede tardar en aparecer tras el arranque
-  // (mismo problema de timing ya documentado en
-  // _restorePendingAutoState, especialmente en cores pesados como PS1 o
-  // N64). Reintenta brevemente antes de rendirse, en vez de fallar a la
-  // primera comprobación como hacía el código anterior.
+  // [SAVE-VERIFY] gameManager puede tardar en aparecer tras el arranque,
+  // especialmente en cores pesados como PS1 o N64. Reintenta brevemente
+  // antes de rendirse, en vez de fallar a la primera comprobación.
   async _waitForGameManager(maxAttempts = 10, delayMs = 200) {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const instance = this.getEmulatorInstance();
@@ -1026,100 +822,17 @@ class EmulatorController {
   }
 
   // ---------------------------------------------------------------------
-  // Autoguardado periódico -- red de seguridad independiente del botón
-  // "Salir del juego"
-  // ---------------------------------------------------------------------
-  //
-  // [SAVE-VERIFY] Antes de esto, el único autoguardado real ocurría
-  // dentro de close({ autoSave: true }), es decir, solo cuando el
-  // usuario pulsaba el botón "Salir del juego" de la topbar. Cerrar la
-  // pestaña, recargar la página, o navegar a otra sección de RetroPlay
-  // sin pasar por ese botón dejaba el progreso de esa sesión sin
-  // guardar -- ni el botón manual "Cargar partida" ni la tarjeta
-  // "Continuar jugando" tenían nada real que restaurar la próxima vez,
-  // aunque el usuario recordara haber "guardado" (recordPlayed() marca
-  // el juego como jugado recientemente para esa tarjeta, pero eso no
-  // implica que exista un save state).
-  //
-  // _startPeriodicAutoSave() guarda cada _PERIODIC_AUTOSAVE_MS mientras
-  // el juego sigue activo, usando el mismo saveState('auto') que ya usa
-  // close() -- mismo camino, mismo fallback SRAM si el core lo necesita,
-  // mismo registro [SAVE-VERIFY] en caso de fallo. Un fallo puntual aquí
-  // NUNCA se muestra al usuario (igual que en close(), ver el comentario
-  // ahí): es un guardado en segundo plano sin acción explícita del
-  // usuario, así que un aviso en pantalla cada pocos minutos sería más
-  // ruido que ayuda. Si de verdad hay un problema de persistencia
-  // persistente, quedará registrado con el prefijo [SAVE-VERIFY] en
-  // consola en cada intento.
-  _startPeriodicAutoSave() {
-    this._stopPeriodicAutoSave();
-    const expectedGame = this.currentGame;
-    this._periodicAutoSaveTimer = setInterval(async () => {
-      // Guarda de concurrencia: si el juego cambió o se cerró desde que
-      // se programó este intervalo, no debe guardar nada -- el propio
-      // close()/launch() ya se encargan de parar y reiniciar el
-      // temporizador en los momentos correctos, pero un intervalo ya en
-      // vuelo (setInterval no se cancela instantáneamente) podría
-      // colarse una vez de más sin esta comprobación.
-      if (this.currentGame !== expectedGame || !this._active) {
-        this._stopPeriodicAutoSave();
-        return;
-      }
-      try {
-        await this.saveState('auto');
-        saveVerifyLog('Autoguardado periódico completado para', expectedGame && expectedGame.id);
-      } catch (err) {
-        saveVerifyError('Autoguardado periódico FALLÓ para', expectedGame && expectedGame.id, err);
-      }
-    }, EmulatorController._PERIODIC_AUTOSAVE_MS);
-  }
-
-  _stopPeriodicAutoSave() {
-    if (this._periodicAutoSaveTimer) {
-      clearInterval(this._periodicAutoSaveTimer);
-      this._periodicAutoSaveTimer = null;
-    }
-  }
-
-  // ---------------------------------------------------------------------
   // Cierre / limpieza
   // ---------------------------------------------------------------------
-  async close({ autoSave = true } = {}) {
-    this._stopPeriodicAutoSave();
-    const instance = this.getEmulatorInstance();
-    // [SAVE-VERIFY] Antes se exigía además que gameManager.getState
-    // existiera como función para siquiera intentar el autosave -- pero
-    // getState() puede existir y aun así lanzar en tiempo de ejecución
-    // (ver el bloque de comentarios "BUG DEL VENDOR" en saveState()), y
-    // saveState() ahora ya sabe degradarse sola al fallback de SRAM. La
-    // única condición real para intentarlo es que gameManager exista.
-    if (autoSave && this.currentGame && instance?.gameManager) {
-      const gameId = this.currentGame.id;
-      try {
-        await this.saveState('auto');
-        saveVerifyLog('Autosave al cerrar completado para', gameId);
-      } catch (err) {
-        // [SAVE-VERIFY] Se registra siempre en consola para poder
-        // depurar un fallo real de guardado. Deliberadamente NO se
-        // avisa al usuario aquí (a diferencia de los demás usos de
-        // _notifyUser en este archivo): el autosave al cerrar se
-        // dispara en cada salida, incluso cuando el jugador no ha
-        // generado progreso nuevo desde el último guardado (p.ej. abrir
-        // el juego y cerrarlo enseguida, o un core sin guardado interno
-        // para ese título) -- avisar en esos casos es un falso positivo
-        // que entrena al usuario a ignorar el aviso, justo cuando sí
-        // importa (ver _notifyUser en saveState/loadState, que sí
-        // avisan porque corresponden a una acción explícita del
-        // usuario: pulsar "Guardar" o "Cargar").
-        saveVerifyError('Autosave al cerrar FALLÓ para', gameId, err);
-      }
-    } else if (autoSave && this.currentGame) {
-      saveVerifyLog('Autosave al cerrar omitido: el core no expone gameManager para', this.currentGame.id);
-    }
+  //
+  // No existe ningún autoguardado -- ni periódico ni al cerrar el juego.
+  // El progreso solo se persiste cuando el usuario pulsa explícitamente
+  // "Guardar partida" y le pone un nombre (ver saveState()). close() se
+  // limita a liberar recursos.
+  async close() {
     clearInterval(this._bootLogTimer);
     clearTimeout(this._startTimeout);
     this._startTimeout = null;
-    this._pendingAutoState = null;
     this._releaseRomResources();
 
     // Destruir el iframe completo es la limpieza real: se lleva consigo
@@ -1138,44 +851,9 @@ class EmulatorController {
   }
 }
 
-// [SAVE-VERIFY] Cada cuánto se autoguarda mientras se juega, en ms.
-// 3 minutos es un compromiso entre "no perder demasiado progreso" y
-// "no generar overhead/parones perceptibles" -- saveState() ya de por
-// sí puede tardar (getState() bloquea el hilo del core un instante) así
-// que un intervalo demasiado corto se notaría como micro-tirones.
-EmulatorController._PERIODIC_AUTOSAVE_MS = 3 * 60 * 1000;
-
 // Instancia global -- un único controlador de emulación activo a la vez.
+// No hay ningún listener de autoguardado (ni pagehide, ni periódico):
+// cerrar la pestaña, recargar o salir del juego sin haber pulsado
+// "Guardar partida" NO persiste nada, por diseño -- el guardado es
+// siempre una acción explícita del usuario, con nombre elegido por él.
 const emulatorController = new EmulatorController();
-
-// [SAVE-VERIFY] Red de seguridad final: si la pestaña se cierra, se
-// recarga, o el usuario navega fuera de RetroPlay mientras hay una
-// partida activa, se intenta un último guardado antes de que la página
-// desaparezca -- sin este listener, el único momento de guardado real
-// era pulsar "Salir del juego" dentro del emulador; cualquier otra
-// forma de irse (cerrar la pestaña, F5, gesto de "atrás" del sistema en
-// móvil) dejaba el progreso de esa sesión sin persistir en absoluto, sin
-// importar el autoguardado periódico si ocurría justo antes del
-// siguiente intervalo programado.
-//
-// pagehide (no beforeunload) porque: 1) beforeunload no se dispara de
-// forma fiable en navegadores móviles ni con el gesto de "atrás", que es
-// como la mayoría de usuarios abandonan una PWA/sitio en el móvil; 2)
-// pagehide es el evento recomendado actualmente para "el usuario se está
-// yendo" y funciona también con el bfcache. saveState() es asíncrono
-// (escribe en IndexedDB) y la página puede desaparecer antes de que
-// termine -- no hay garantía dura de que este guardado llegue a
-// completarse siempre, pero sí cubre la inmensa mayoría de salidas
-// reales, que es justo lo que faltaba.
-window.addEventListener('pagehide', () => {
-  if (!emulatorController._active || !emulatorController.currentGame) return;
-  const instance = emulatorController.getEmulatorInstance();
-  if (!instance?.gameManager) return;
-  saveVerifyLog('pagehide: intentando guardado final para', emulatorController.currentGame.id);
-  // No se puede await dentro de un listener de pagehide -- se dispara
-  // "en el mejor esfuerzo posible" antes de que el navegador continúe
-  // con la descarga de la página.
-  emulatorController.saveState('auto').catch((err) => {
-    saveVerifyError('pagehide: guardado final FALLÓ para', emulatorController.currentGame && emulatorController.currentGame.id, err);
-  });
-});
