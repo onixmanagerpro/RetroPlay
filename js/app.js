@@ -405,225 +405,13 @@ async function launchGame(game) {
 
 async function closeEmulator() {
   const view = document.getElementById('emulator-view');
-  await emulatorController.close();
+  await emulatorController.close({ autoSave: true });
   view.classList.remove('is-open');
   view.setAttribute('aria-hidden', 'true');
   document.getElementById('emulator-canvas-host').innerHTML = '';
   const { root } = parseHash();
   if (root === 'home') renderHome();
   if (root === 'library') renderLibraryView();
-}
-
-// ===========================================================================
-// AUTENTICACIÓN (Firebase) -- necesaria para guardar/cargar partidas
-// ===========================================================================
-function openAuthModal() {
-  document.getElementById('auth-error-msg').textContent = '';
-  document.getElementById('auth-modal-backdrop').classList.add('is-open');
-  document.getElementById('auth-modal-backdrop').setAttribute('aria-hidden', 'false');
-}
-
-function closeAuthModal() {
-  document.getElementById('auth-modal-backdrop').classList.remove('is-open');
-  document.getElementById('auth-modal-backdrop').setAttribute('aria-hidden', 'true');
-}
-
-function updateAccountUI() {
-  const btn = document.getElementById('header-account-btn');
-  const label = document.getElementById('header-account-label');
-  if (!btn || !label) return;
-  const user = retroStorage.currentUser();
-  if (user) {
-    btn.classList.add('is-signed-in');
-    btn.title = 'Cerrar sesión (' + (user.email || user.displayName || '') + ')';
-    label.textContent = user.displayName || user.email || 'Mi cuenta';
-  } else {
-    btn.classList.remove('is-signed-in');
-    btn.title = 'Iniciar sesión';
-    label.textContent = 'Iniciar sesión';
-  }
-}
-
-function bindAuthUI() {
-  if (!retroStorage.isFirebaseReady) {
-    console.error('[app] Firebase no está configurado (ver FIREBASE_CONFIG en js/storage.js). Guardar/cargar partidas no funcionará hasta configurarlo.');
-  }
-
-  retroStorage.onAuthStateChanged(() => updateAccountUI());
-
-  document.getElementById('header-account-btn').addEventListener('click', async () => {
-    if (retroStorage.isSignedIn()) {
-      await retroStorage.signOut();
-      showSaveWarningToast('Sesión cerrada.');
-    } else {
-      openAuthModal();
-    }
-  });
-
-  document.getElementById('auth-google-btn').addEventListener('click', async () => {
-    const errEl = document.getElementById('auth-error-msg');
-    errEl.textContent = '';
-    try {
-      await retroStorage.signInWithGoogle();
-      closeAuthModal();
-    } catch (err) {
-      errEl.textContent = err.message || 'No se pudo iniciar sesión con Google.';
-    }
-  });
-
-  document.getElementById('auth-email-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const errEl = document.getElementById('auth-error-msg');
-    errEl.textContent = '';
-    const email = document.getElementById('auth-email-input').value.trim();
-    const password = document.getElementById('auth-password-input').value;
-    try {
-      await retroStorage.signInWithEmail(email, password);
-      closeAuthModal();
-    } catch (err) {
-      errEl.textContent = err.message || 'No se pudo iniciar sesión.';
-    }
-  });
-
-  document.getElementById('auth-register-btn').addEventListener('click', async () => {
-    const errEl = document.getElementById('auth-error-msg');
-    errEl.textContent = '';
-    const email = document.getElementById('auth-email-input').value.trim();
-    const password = document.getElementById('auth-password-input').value;
-    if (!email || !password) {
-      errEl.textContent = 'Rellena correo y contraseña para crear la cuenta.';
-      return;
-    }
-    try {
-      await retroStorage.registerWithEmail(email, password);
-      closeAuthModal();
-    } catch (err) {
-      errEl.textContent = err.message || 'No se pudo crear la cuenta.';
-    }
-  });
-
-  document.getElementById('auth-modal-backdrop').addEventListener('click', (e) => {
-    if (e.target.id === 'auth-modal-backdrop') closeAuthModal();
-  });
-}
-
-// ===========================================================================
-// GUARDAR / CARGAR PARTIDA (único mecanismo de persistencia de partidas)
-// ===========================================================================
-function openSaveStateModal() {
-  if (!retroStorage.isSignedIn()) {
-    closeAuthModal();
-    openAuthModal();
-    return;
-  }
-  document.getElementById('save-state-error-msg').textContent = '';
-  document.getElementById('save-state-name-input').value = '';
-  document.getElementById('save-modal-backdrop').classList.add('is-open');
-  document.getElementById('save-modal-backdrop').setAttribute('aria-hidden', 'false');
-  setTimeout(() => document.getElementById('save-state-name-input').focus(), 50);
-}
-
-function closeSaveStateModal() {
-  document.getElementById('save-modal-backdrop').classList.remove('is-open');
-  document.getElementById('save-modal-backdrop').setAttribute('aria-hidden', 'true');
-}
-
-async function openLoadStateModal() {
-  if (!retroStorage.isSignedIn()) {
-    closeAuthModal();
-    openAuthModal();
-    return;
-  }
-  const backdrop = document.getElementById('load-modal-backdrop');
-  const listEl = document.getElementById('load-state-list');
-  const emptyEl = document.getElementById('load-state-empty-msg');
-  listEl.innerHTML = '';
-  emptyEl.style.display = 'none';
-  backdrop.classList.add('is-open');
-  backdrop.setAttribute('aria-hidden', 'false');
-
-  const game = emulatorController.currentGame;
-  if (!game) { closeLoadStateModal(); return; }
-
-  let saves = [];
-  try {
-    saves = await retroStorage.listSaveStatesForGame(game.id);
-  } catch (err) {
-    showSaveWarningToast(err.message || 'No se pudieron cargar tus partidas guardadas.');
-    closeLoadStateModal();
-    return;
-  }
-
-  if (!saves.length) {
-    emptyEl.style.display = 'block';
-    return;
-  }
-
-  saves.forEach((save) => {
-    const row = document.createElement('div');
-    row.className = 'save-state-row';
-    row.innerHTML = `
-      <div class="save-state-row-info">
-        <span class="save-state-row-name">${escapeHtml(save.name)}</span>
-        <span class="save-state-row-date">${new Date(save.updatedAt).toLocaleString()}</span>
-      </div>
-      <button class="save-state-row-delete" type="button" title="Eliminar partida" aria-label="Eliminar partida">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>
-      </button>
-    `;
-    row.querySelector('.save-state-row-info').addEventListener('click', async () => {
-      try {
-        await emulatorController.loadState(save.id);
-        closeLoadStateModal();
-        showSaveWarningToast(`Partida «${save.name}» cargada.`);
-      } catch (err) {
-        showSaveWarningToast(err.message || 'No se pudo cargar esa partida.');
-      }
-    });
-    row.querySelector('.save-state-row-delete').addEventListener('click', async (e) => {
-      e.stopPropagation();
-      try {
-        await retroStorage.deleteSaveState(save.id);
-        row.remove();
-        if (!listEl.children.length) emptyEl.style.display = 'block';
-      } catch (err) {
-        showSaveWarningToast(err.message || 'No se pudo eliminar esa partida.');
-      }
-    });
-    listEl.appendChild(row);
-  });
-}
-
-function closeLoadStateModal() {
-  document.getElementById('load-modal-backdrop').classList.remove('is-open');
-  document.getElementById('load-modal-backdrop').setAttribute('aria-hidden', 'true');
-}
-
-function bindSaveLoadUI() {
-  document.getElementById('save-state-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const errEl = document.getElementById('save-state-error-msg');
-    errEl.textContent = '';
-    const name = document.getElementById('save-state-name-input').value.trim();
-    if (!name) { errEl.textContent = 'Ponle un nombre a la partida.'; return; }
-    try {
-      await emulatorController.saveState(name);
-      closeSaveStateModal();
-      flashButton('emulator-save-state');
-      showSaveWarningToast(`Partida «${name}» guardada.`);
-    } catch (err) {
-      errEl.textContent = err.message || 'No se pudo guardar la partida.';
-    }
-  });
-  document.getElementById('save-state-cancel-btn').addEventListener('click', closeSaveStateModal);
-  document.getElementById('save-modal-backdrop').addEventListener('click', (e) => {
-    if (e.target.id === 'save-modal-backdrop') closeSaveStateModal();
-  });
-
-  document.getElementById('load-state-cancel-btn').addEventListener('click', closeLoadStateModal);
-  document.getElementById('load-modal-backdrop').addEventListener('click', (e) => {
-    if (e.target.id === 'load-modal-backdrop') closeLoadStateModal();
-  });
 }
 
 // ===========================================================================
@@ -637,111 +425,61 @@ async function triggerDownload(game) {
   });
 
   try {
-    // game.file puede ser:
-    //   - un objeto { source: 'google-drive', ... }: el catálogo actual
-    //     de RetroPlay (22 de 23 juegos). Estos NUNCA deben pasar por
-    //     resolveGameFileEntries(): esa función asume que cada
-    //     referencia es un string (ref.split('/')...), y un objeto de
-    //     Drive rompe ahí mismo con un TypeError antes de llegar siquiera
-    //     a intentar un fetch. window.loadGoogleDriveGameFiles() (ver
-    //     js/google-drive-source.js) es quien sabe resolver esta forma,
-    //     incluida la variante multi-archivo { cue, files } de los CUE de
-    //     PS1 -- es el mismo chequeo que ya usa emulator.js en launch()
-    //     para decidir cómo cargar el juego al jugar online, aplicado
-    //     aquí también para descargar.
-    //   - un string o un array de strings (github-release://... o ruta
-    //     local): comportamiento de siempre, sin tocar.
-    if (window.isGoogleDriveGameSource?.(game.file)) {
-      await downloadGoogleDriveGame(game);
-    } else {
-      await downloadResolvedEntries(game, await window.resolveGameFileEntries(game.file));
+    // game.file puede ser un string (un solo archivo, comportamiento de
+    // siempre) o un array (juego multi-archivo, p.ej. PS1 .cue+.bin).
+    // resolveGameFileEntries() normaliza ambos casos a una lista de
+    // { name, url } ya resueltos (github-release://... o ruta local
+    // indistintamente -- ver js/github-release-source.js). Para
+    // descargar, cada archivo se guarda por separado con su nombre real,
+    // porque en el navegador no podemos "reunirlos en una carpeta": el
+    // usuario necesita el .cue y el/los .bin juntos en la misma carpeta
+    // local para poder usarlos luego en un emulador de escritorio.
+    const entries = await window.resolveGameFileEntries(game.file);
+    const isMulti = entries.length > 1;
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      const res = await fetch(entry.url);
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} al descargar ${entry.name}`);
+
+      const total = Number(res.headers.get('content-length')) || 0;
+      const reader = res.body.getReader();
+      const chunks = [];
+      let received = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (total) {
+          // Con varios archivos, cada uno ocupa su propio tramo del 0-100%
+          // para que la barra de progreso avance de forma continua en vez
+          // de reiniciar a 0 entre archivo y archivo.
+          const fileProgress = received / total;
+          const overallProgress = ((i + fileProgress) / entries.length) * 100;
+          updateToastProgress(game.id, Math.min(100, overallProgress));
+        }
+      }
+
+      const blob = new Blob(chunks);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = entry.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     }
+
+    finishToast(game.id, true, null, isMulti
+      ? `Descargados ${entries.length} archivos -- guárdalos juntos en la misma carpeta.`
+      : null);
   } catch (err) {
     console.warn('[downloads]', err);
     finishToast(game.id, false, err.message || 'No se encontró el archivo. Añade el archivo real en /downloads y actualiza data/games.json, o revisa la referencia github-release://.');
   }
-}
-
-// Descarga vía fetch() por streaming, para game.file en formato
-// github-release://... o ruta local (comportamiento previo, intacto).
-async function downloadResolvedEntries(game, entries) {
-  const isMulti = entries.length > 1;
-
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    const res = await fetch(entry.url);
-    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} al descargar ${entry.name}`);
-
-    const total = Number(res.headers.get('content-length')) || 0;
-    const reader = res.body.getReader();
-    const chunks = [];
-    let received = 0;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      received += value.length;
-      if (total) {
-        // Con varios archivos, cada uno ocupa su propio tramo del 0-100%
-        // para que la barra de progreso avance de forma continua en vez
-        // de reiniciar a 0 entre archivo y archivo.
-        const fileProgress = received / total;
-        const overallProgress = ((i + fileProgress) / entries.length) * 100;
-        updateToastProgress(game.id, Math.min(100, overallProgress));
-      }
-    }
-
-    downloadBlob(new Blob(chunks), entry.name);
-  }
-
-  finishToast(game.id, true, null, isMulti
-    ? `Descargados ${entries.length} archivos -- guárdalos juntos en la misma carpeta.`
-    : null);
-}
-
-// Descarga vía loadGoogleDriveGameFiles() para game.file en formato
-// { source: 'google-drive', ... }, simple o { cue, files }. A
-// diferencia del streaming por fetch() de arriba, aquí los bytes llegan
-// como Blob ya completo (ver fetchGoogleDriveBlob en
-// js/google-drive-source.js), así que el progreso se marca por archivo
-// completado en vez de por bytes recibidos -- no hay content-length
-// intermedio que leer durante la descarga de cada uno.
-async function downloadGoogleDriveGame(game) {
-  const assets = await window.loadGoogleDriveGameFiles(game.file, {
-    onProgress: (message) => {
-      const el = document.getElementById(`toast-${game.id}`);
-      const sub = el?.querySelector('.toast-sub');
-      if (sub) sub.textContent = message;
-    }
-  });
-
-  try {
-    const files = [assets.main, ...assets.companions];
-    const isMulti = files.length > 1;
-
-    for (let i = 0; i < files.length; i++) {
-      downloadBlob(files[i].blob, files[i].mountedName || files[i].name);
-      updateToastProgress(game.id, ((i + 1) / files.length) * 100);
-    }
-
-    finishToast(game.id, true, null, isMulti
-      ? `Descargados ${files.length} archivos -- guárdalos juntos en la misma carpeta.`
-      : null);
-  } finally {
-    assets.release();
-  }
-}
-
-function downloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
 }
 
 function showToast({ id, title, sub }) {
@@ -756,27 +494,6 @@ function showToast({ id, title, sub }) {
   `;
   container.appendChild(el);
 }
-
-// [SAVE-VERIFY] Toast puntual con auto-dismiss, independiente del flujo
-// de descarga (showToast/updateToastProgress/finishToast no se
-// auto-eliminan por sí solos, están pensados para que otro paso los
-// complete). Usado por emulator.js para avisar de fallos reales de
-// guardado/carga que antes se tragaban en silencio.
-function showSaveWarningToast(message) {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
-  const id = `save-warning-${Date.now()}`;
-  const el = document.createElement('div');
-  el.className = 'toast';
-  el.id = id;
-  el.innerHTML = `
-    <div class="toast-title">Aviso de guardado</div>
-    <div class="toast-sub">${escapeHtml(message)}</div>
-  `;
-  container.appendChild(el);
-  setTimeout(() => { el.remove(); }, 6000);
-}
-window.showSaveWarningToast = showSaveWarningToast;
 
 function updateToastProgress(id, pct) {
   const el = document.getElementById(`toast-${id}`);
@@ -1124,11 +841,24 @@ function bindGlobalEvents() {
   });
 
   document.getElementById('emulator-close').addEventListener('click', closeEmulator);
-  document.getElementById('emulator-save-state').addEventListener('click', () => {
-    openSaveStateModal();
+  document.getElementById('emulator-save-state').addEventListener('click', async () => {
+    try {
+      await emulatorController.saveState('manual');
+      flashButton('emulator-save-state');
+    } catch (err) {
+      console.warn(err);
+    }
   });
-  document.getElementById('emulator-load-state').addEventListener('click', () => {
-    openLoadStateModal();
+  document.getElementById('emulator-load-state').addEventListener('click', async () => {
+    try {
+      await emulatorController.loadState('manual');
+      flashButton('emulator-load-state');
+    } catch (err) {
+      try {
+        await emulatorController.loadState('auto');
+        flashButton('emulator-load-state');
+      } catch (_) { console.warn('Sin partida guardada todavía'); }
+    }
   });
   document.getElementById('emulator-config-gamepad').addEventListener('click', () => {
     emulatorController.openNativeGamepadConfig();
@@ -1205,10 +935,6 @@ async function init() {
   await gameLibrary.load();
   await refreshFavoriteIdsCache();
   bindGlobalEvents();
-  bindAuthUI();
-  bindSaveLoadUI();
-  await retroStorage.waitForAuthReady();
-  updateAccountUI();
   updateGamepadIndicators(gamepadManager.isConnected(), gamepadManager.getActivePad());
   handleRoute();
 }
