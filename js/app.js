@@ -867,7 +867,12 @@ function bindGlobalEvents() {
       await emulatorController.saveState('manual');
       flashButton('emulator-save-state');
     } catch (err) {
+      // Antes este fallo solo se registraba con console.warn -- invisible
+      // para quien no tiene devtools abiertas, así que un guardado que
+      // fallara parecía simplemente no hacer nada. showSaveWarningToast
+      // ya existe precisamente para esto (ver su definición más abajo).
       console.warn(err);
+      showSaveWarningToast(err.message || 'No se pudo guardar la partida.');
     }
   });
   document.getElementById('emulator-load-state').addEventListener('click', async () => {
@@ -878,7 +883,15 @@ function bindGlobalEvents() {
       try {
         await emulatorController.loadState('auto');
         flashButton('emulator-load-state');
-      } catch (_) { console.warn('Sin partida guardada todavía'); }
+      } catch (err2) {
+        // Mismo caso que el guardado: sin este toast, pulsar "Cargar
+        // partida" sin tener aún ninguna partida guardada no daba
+        // ninguna señal visible -- parecía que el botón no hacía nada
+        // (o que cargar era imposible), en vez de avisar de que
+        // simplemente no hay nada que cargar todavía.
+        console.warn('Sin partida guardada todavía');
+        showSaveWarningToast(err2.message || 'Todavía no hay ninguna partida guardada para este juego.');
+      }
     }
   });
   document.getElementById('emulator-config-gamepad').addEventListener('click', () => {
