@@ -35,12 +35,14 @@
  */
 
 const FIREBASE_CONFIG = {
-  apiKey: 'TU_API_KEY',
-  authDomain: 'TU_PROYECTO.firebaseapp.com',
-  projectId: 'TU_PROYECTO',
-  storageBucket: 'TU_PROYECTO.appspot.com',
-  messagingSenderId: 'TU_MESSAGING_SENDER_ID',
-  appId: 'TU_APP_ID'
+  apiKey: 'AIzaSyA5wcZXzitPt8CE15cvKEwzTRnsT8xW8KM',
+  authDomain: 'inframe-capture.firebaseapp.com',
+  databaseURL: 'https://inframe-capture-default-rtdb.europe-west1.firebasedatabase.app',
+  projectId: 'inframe-capture',
+  storageBucket: 'inframe-capture.firebasestorage.app',
+  messagingSenderId: '866171827071',
+  appId: '1:866171827071:web:4c1affa83d63a6bdb3a04a',
+  measurementId: 'G-2Y1GK0KPHC'
 };
 
 const DB_NAME = 'retroplay-db';
