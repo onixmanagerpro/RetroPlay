@@ -350,9 +350,23 @@ class EmulatorController {
         'emulator.js': vendorBase + 'emulator.js',
         'emulator.css': vendorBase + 'emulator.css',
         'libunrar.js': vendorBase + 'libunrar.js',
-        'libunrar.wasm': vendorBase + 'libunrar.wasm'
+        'libunrar.wasm': vendorBase + 'libunrar.wasm',
+        // loader.js también consulta EJS_paths[idioma] (ver su
+        // getLanguagePath) ANTES de intentar
+        // EJS_pathtodata+"localization/<idioma>.json" -- que con
+        // EJS_pathtodata apuntando al CDN de datos de los cores (ver
+        // abajo) 404 porque ahí no hay ninguna carpeta "localization/".
+        // Con esta entrada, el idioma se sirve desde el mismo JSON que ya
+        // vendorizamos en vendor/emulatorjs/localization/es.json.
+        'es': vendorBase + 'localization/es.json'
       };
       iWin.EJS_pathtodata = CORE_DATA_CDN;
+      // El resto de la interfaz de RetroPlay está fijada en español (no
+      // hay selector de idioma), así que el reproductor también se fuerza
+      // a 'es' en vez de autodetectar el idioma del navegador de cada
+      // visitante (p.ej. "es-ES", "es-MX" o "en-US") -- así siempre hay
+      // una coincidencia exacta con la clave 'es' de EJS_paths de arriba.
+      iWin.EJS_language = 'es';
       iWin.EJS_gameName = game.name;
       iWin.EJS_backgroundColor = '#000000';
       iWin.EJS_startOnLoaded = true;
@@ -672,6 +686,15 @@ class EmulatorController {
     }
     const gameManager = instance.gameManager;
 
+    // [SAVE-VERIFY] Último fallo ocurrido al PERSISTIR en Firebase (no al
+    // generar los bytes de la partida en el core). Es la distinción
+    // clave para no reportar un error engañoso al final de esta función:
+    // si el core sí logró producir datos (snapshot o SRAM) pero Firebase
+    // rechazó guardarlos -- reglas de Firestore, sesión caducada, sin
+    // red -- el problema real es ESE y es el que debe ver el usuario, no
+    // "este core no admite guardar partidas" (que sería falso: sí pudo).
+    let persistError = null;
+
     // Camino principal: snapshot completo de memoria (posición exacta
     // dentro de la partida). Es el único que soporta continuar
     // literalmente donde lo dejaste, así que se intenta siempre primero.
@@ -679,9 +702,17 @@ class EmulatorController {
       try {
         const stateBytes = gameManager.getState();
         const base64 = this._bytesToBase64(stateBytes);
-        const record = await retroStorage.saveEmulatorState(this.currentGame, name, base64, 'state');
-        await retroStorage.recordPlayed(this.currentGame.id, 100);
-        return record;
+        try {
+          const record = await retroStorage.saveEmulatorState(this.currentGame, name, base64, 'state');
+          await retroStorage.recordPlayed(this.currentGame.id, 100);
+          return record;
+        } catch (err) {
+          // El core SÍ generó el snapshot -- esto es un fallo de Firebase,
+          // no del emulador. Se guarda para reportarlo tal cual al final
+          // si el fallback de SRAM tampoco consigue persistir.
+          persistError = err;
+          saveVerifyError('Firebase rechazó el guardado del snapshot completo', this.currentGame.id, name, err);
+        }
       } catch (err) {
         // No relanzamos todavía: para eso está el fallback de abajo.
         // Pero SÍ se registra con detalle -- este catch es precisamente
@@ -700,17 +731,34 @@ class EmulatorController {
         const saveBytes = gameManager.getSaveFile();
         if (saveBytes && saveBytes.length) {
           const base64 = this._bytesToBase64(saveBytes);
-          const record = await retroStorage.saveEmulatorState(this.currentGame, name, base64, 'sram');
-          await retroStorage.recordPlayed(this.currentGame.id, 100);
-          saveVerifyLog('Guardado como partida SRAM (fallback, sin snapshot completo) para', this.currentGame.id, name);
-          this._notifyUser?.('Guardado el progreso de la partida guardada del juego (no la posición exacta en pantalla): este core no admite snapshots completos ahora mismo.');
-          return record;
+          try {
+            const record = await retroStorage.saveEmulatorState(this.currentGame, name, base64, 'sram');
+            await retroStorage.recordPlayed(this.currentGame.id, 100);
+            saveVerifyLog('Guardado como partida SRAM (fallback, sin snapshot completo) para', this.currentGame.id, name);
+            this._notifyUser?.('Guardado el progreso de la partida guardada del juego (no la posición exacta en pantalla): este core no admite snapshots completos ahora mismo.');
+            return record;
+          } catch (err) {
+            // Igual que arriba: el core SÍ generó los datos de SRAM, así
+            // que un fallo aquí es de Firebase, no del core.
+            persistError = err;
+            saveVerifyError('Firebase rechazó el guardado de la SRAM', this.currentGame.id, name, err);
+          }
+        } else {
+          saveVerifyError('getSaveFile() no devolvió datos (el juego no tiene partida guardada interna) para', this.currentGame.id, name);
         }
-        saveVerifyError('getSaveFile() no devolvió datos (el juego no tiene partida guardada interna) para', this.currentGame.id, name);
       } catch (err) {
         saveVerifyError('getSaveFile() también falló al guardar', this.currentGame.id, name, err);
       }
     }
+
+    // [SAVE-VERIFY] Si el core llegó a generar los datos de la partida y
+    // lo único que falló fue persistirlos en Firebase, ese es el error
+    // real (p.ej. "Missing or insufficient permissions" de Firestore) y
+    // se propaga tal cual -- es mucho más accionable para el usuario que
+    // el mensaje genérico de abajo, y evita hacerle pensar que el
+    // problema es el core/la consola cuando en realidad es la
+    // configuración de Firebase.
+    if (persistError) throw persistError;
 
     throw new Error('El emulador no pudo guardar la partida: ni el snapshot completo ni la partida guardada interna están disponibles para este core ahora mismo.');
   }
