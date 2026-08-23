@@ -89,6 +89,20 @@ const BOOT_MESSAGES = [
   'Sincronizando entrada de mando…'
 ];
 
+// -----------------------------------------------------------------------
+// [SAVE-VERIFY] Mismo prefijo de log que storage.js -- deliberadamente,
+// para que un fallo de guardado/carga se pueda seguir de principio a fin
+// en la consola filtrando por "[SAVE-VERIFY]", sin importar si el fallo
+// ocurrió en la capa de persistencia (storage.js) o en la capa de
+// orquestación del emulador (este archivo).
+// -----------------------------------------------------------------------
+function saveVerifyLog(...args) {
+  console.log('[SAVE-VERIFY]', ...args);
+}
+function saveVerifyError(...args) {
+  console.error('[SAVE-VERIFY]', ...args);
+}
+
 class EmulatorController {
   constructor() {
     this.currentGame = null;
@@ -100,10 +114,37 @@ class EmulatorController {
     this._romObjectUrls = new Set();
     this._romAssets = null;
     this._startTimeout = null;
+    // No hay autosave de ningún tipo: guardar y cargar son siempre
+    // acciones explícitas del usuario a través de saveState(name) /
+    // loadState(saveId), con nombre elegido por él y persistidas en
+    // Firebase (ver storage.js).
   }
 
   isSupported(consoleId) {
     return !!CONSOLE_CORE_MAP[consoleId];
+  }
+
+  // [SAVE-VERIFY] Puente hacia el sistema de toasts de app.js
+  // (showToast), sin crear una dependencia dura: si por lo que sea
+  // showToast no está cargado en la página (uso de emulator.js fuera de
+  // este contexto, orden de carga distinto), se degrada a console.error
+  // en vez de lanzar. Un fallo de guardado siempre debe ser visible en
+  // algún sitio -- nunca silencioso -- pero nunca debe romper el resto
+  // de la app por sí mismo.
+  _notifyUser(message) {
+    // showToast() de app.js está diseñado para el flujo de descarga
+    // (progreso + finishToast lo completa/actualiza) y no se
+    // auto-elimina por sí solo -- usarlo tal cual para un aviso puntual
+    // dejaría el toast pegado en pantalla para siempre. Por eso se usa
+    // showSaveWarningToast(), una función separada en app.js pensada
+    // para avisos puntuales con auto-dismiss, que reutiliza el mismo
+    // contenedor y las mismas clases CSS (mismo aspecto visual, sin
+    // duplicar estilos).
+    if (typeof window !== 'undefined' && typeof window.showSaveWarningToast === 'function') {
+      window.showSaveWarningToast(message);
+    } else {
+      saveVerifyError('(sin showSaveWarningToast disponible) ', message);
+    }
   }
 
   /**
@@ -197,7 +238,7 @@ class EmulatorController {
     // Esto es lo que garantiza que loader.js nunca se ejecute dos veces
     // en el mismo scope global.
     if (this._active) {
-      await this.close({ autoSave: true });
+      await this.close();
     }
 
     this._active = true;
@@ -211,9 +252,11 @@ class EmulatorController {
     hostEl.innerHTML = '';
 
     try {
-      // Intentamos recuperar un save-state automático previo (autosave
-      // al salir del juego la última vez) para ofrecer continuidad.
-      const savedState = await retroStorage.loadEmulatorState(game.id, 'auto');
+      // El progreso ya NO se recupera automáticamente al lanzar el juego:
+      // el único mecanismo de guardado/carga es el par de botones
+      // "Guardar partida" / "Cargar partida" de la topbar, con nombre
+      // elegido por el usuario (ver saveState()/loadState() más abajo y
+      // storage.js). No hay autosave.
       if (loadAbortController.signal.aborted || !this._active || this.currentGame !== game) return;
 
       const iframe = document.createElement('iframe');
@@ -322,6 +365,34 @@ class EmulatorController {
       // askBeforeExit=false porque el cierre limpio ya lo gestionamos
       // nosotros desde la topbar de RetroPlay (autosave incluido).
       iWin.EJS_askBeforeExit = false;
+      // El core WASM que EmulatorJS descarga viene en dos variantes: la
+      // moderna y "-legacy". La moderna es la única que exporta
+      // EmulatorJSGetState en su Module -- sin eso, gameManager.getState()
+      // lanza "this.Module.EmulatorJSGetState is not a function" y
+      // save/load state no funcionan nunca, para ningún juego.
+      //
+      // Qué variante se descarga depende de this.webgl2Enabled dentro de
+      // emulator.min.js, que se resuelve así (por orden de prioridad):
+      //   1. Un valor previamente guardado en el localStorage DEL NAVEGADOR
+      //      para este core+juego concreto (preGetSetting).
+      //   2. Si no hay nada en localStorage: EJS_defaultOptions.
+      //   3. Si tampoco hay defaultOptions: el JSON de reporte del core
+      //      (cores/reports/<core>.json), pedido por fetch al CDN.
+      // El paso 3 para snes9x concretamente no declara soporte WebGL2 (el
+      // report real trae "options": {}), así que aunque ese fetch tenga
+      // éxito el resultado es igualmente "-legacy" -- el fetch en sí (que
+      // en algunos navegadores además da 404) nunca fue la causa real.
+      // Y el paso 2 (EJS_defaultOptions) puede perder contra el paso 1 si
+      // el navegador ya tenía algo guardado de una partida anterior.
+      // EJS_disableLocalStorage salta el paso 1 por completo, así que la
+      // resolución cae siempre y de forma determinista en defaultOptions,
+      // sin depender de qué haya en el navegador de cada persona. Solo
+      // afecta a un puñado de ajustes internos del propio reproductor
+      // (hilos, menú, rebobinado, rotación de vídeo) que RetroPlay ya fija
+      // explícitamente vía EJS_Buttons/EJS_* -- las partidas guardadas
+      // viven exclusivamente en Firebase vía retroStorage, no aquí.
+      iWin.EJS_disableLocalStorage = true;
+      iWin.EJS_defaultOptions = { webgl2Enabled: 'enabled' };
 
       // ---------------------------------------------------------------
       // ARRANQUE FORZADO SIN MENÚ (todas las consolas, en especial PS1)
@@ -333,22 +404,31 @@ class EmulatorController {
       // UI interna del core, la ocultamos a nivel de contenedor y
       // forzamos el intento de arranque inmediato del contenido ya
       // cargado en cuanto el reproductor esté listo.
+      // TODOS los mecanismos nativos de guardado/carga de EmulatorJS
+      // (saveState, loadState, quickSave, quickLoad, save/loadSavefiles)
+      // se ocultan sin excepción. La única forma de guardar o cargar una
+      // partida en RetroPlay son los dos botones de la topbar propia
+      // ("Guardar partida" / "Cargar partida"), que piden un nombre y
+      // pasan por retroStorage -> Firebase. Cualquier otro camino nativo
+      // (quickSave escribe al filesystem virtual del core sin pasar por
+      // retroStorage) se pierde al cerrar el juego sin aviso, así que se
+      // elimina por completo de la interfaz.
       iWin.EJS_Buttons = {
         playPause: false,
         restart: true,
         mute: false,
         settings: false,   // oculta el acceso al menú de configuración del core
         fullscreen: true,
-        saveState: true,
-        loadState: true,
+        saveState: false,
+        loadState: false,
         screenRecord: false,
         gamepad: true,
         cheat: false,
         volume: true,
         saveSavefiles: false,
         loadSavefiles: false,
-        quickSave: true,
-        quickLoad: true,
+        quickSave: false,
+        quickLoad: false,
         screenshot: false,
         cacheManager: false,
         exitEmulation: true
@@ -387,15 +467,15 @@ class EmulatorController {
       this._startTimeout = setTimeout(() => {
         if (this._active && this.currentGame === game) {
           onError?.('El archivo de este juego no es un disco de PS1 válido (.bin/.cue/.iso), así que el núcleo no pudo arrancarlo automáticamente. Sustituye el archivo en /games/ps1/ por una imagen de disco real.');
-          this.close({ autoSave: false });
+          this.close();
         }
       }, startTimeoutMs);
 
-      // Guardado automático de partidas: cuando EmulatorJS detecta un
-      // cambio en la memoria persistente del juego, lo reflejamos en
-      // IndexedDB vía storage.js -- así "Continuar jugando" siempre
-      // tiene el último progreso real.
-      iWin.EJS_onSaveState = (e) => this._handleSaveStateEvent(e);
+      // No se registran EJS_onSaveState / EJS_onLoadState: los botones
+      // nativos que los disparan están desactivados en EJS_Buttons. El
+      // único guardado/carga posible es el manual, por nombre, vía los
+      // botones propios de la topbar (ver saveState()/loadState() más
+      // abajo).
       iWin.EJS_onGameStart = () => {
         clearTimeout(this._startTimeout);
         this._startTimeout = null;
@@ -410,11 +490,11 @@ class EmulatorController {
         retroStorage.recordPlayed(game.id, 5);
       };
 
-      if (savedState && savedState.data) {
-        iWin.EJS_loadStateURL = this._base64ToBytes(savedState.data);
-      } else {
-        iWin.EJS_loadStateURL = null;
-      }
+      // No se usa EJS_loadStateURL: no hay ningún autosave que precargar
+      // al arrancar. Cargar una partida es siempre una acción explícita
+      // del usuario a través del botón "Cargar partida" (ver loadState()
+      // más abajo), nunca algo automático al lanzar el juego.
+      iWin.EJS_loadStateURL = null;
 
       await this._injectLoader(iDoc, iWin);
     } catch (err) {
@@ -423,7 +503,7 @@ class EmulatorController {
       }
       console.error('[emulator] Error al iniciar', err);
       clearInterval(this._bootLogTimer);
-      await this.close({ autoSave: false });
+      await this.close();
       onError?.(err.message || 'No se pudo iniciar el emulador. Comprueba tu conexión e inténtalo de nuevo.');
     }
   }
@@ -542,43 +622,143 @@ class EmulatorController {
     });
   }
 
-  async _handleSaveStateEvent(e) {
-    if (!this.currentGame || !e) return;
-    try {
-      const bytes = e.state || e;
-      const base64 = this._bytesToBase64(new Uint8Array(bytes));
-      await retroStorage.saveEmulatorState(this.currentGame.id, 'auto', base64);
-      await retroStorage.recordPlayed(this.currentGame.id, 60);
-    } catch (err) {
-      console.warn('[emulator] No se pudo persistir el save state automático', err);
-    }
-  }
-
   // ---------------------------------------------------------------------
   // Guardado / carga manual de partidas -- botones de la topbar
   // ---------------------------------------------------------------------
-  async saveState(slot = 'auto') {
-    const instance = this.getEmulatorInstance();
-    if (!instance?.gameManager?.getState) {
+  //
+  // [SAVE-VERIFY] BUG DEL VENDOR: Module.EmulatorJSGetState ausente
+  // ---------------------------------------------------------------
+  // gameManager.getState() (dentro de emulator.min.js) es literalmente
+  // `return this.Module.EmulatorJSGetState()` -- sin ningún fallback.
+  // EmulatorJSGetState es un símbolo que exporta el propio CORE WASM
+  // compilado (genesis_plus_gx-wasm.data, servido desde el CDN de
+  // EmulatorJS), no algo que emulator.min.js pueda sintetizar por su
+  // cuenta. Cuando el build del core servido en un momento dado no
+  // exporta ese símbolo (confirmado aquí para genesis_plus_gx; es un
+  // problema conocido y reportado contra EmulatorJS -- ver issue #1013
+  // del propio repo, "[Bug] Save/Load state doesn't work", con el mismo
+  // síntoma de raíz para otro core), la llamada revienta con
+  // "this.Module.EmulatorJSGetState is not a function" para CUALQUIER
+  // juego de esa consola, siempre -- no es un fallo intermitente ni de
+  // timing (por eso reintentar getState() sin más no sirve de nada).
+  //
+  // Como RetroPlay vendoriza emulator.min.js localmente pero sirve los
+  // binarios de cada core en vivo desde CORE_DATA_CDN, no controlamos
+  // qué build de genesis_plus_gx llega en cada visita -- así que en vez
+  // de asumir que getState() funciona, saveState() ahora se degrada con
+  // gracia a un segundo mecanismo que SÍ es independiente de
+  // EmulatorJSGetState: gameManager.getSaveFile(), que vuelca la
+  // partida guardada tipo pila/batería (SRAM) escribiéndola a través de
+  // la función cwrapped cmd_savefiles y leyéndola de vuelta con
+  // FS.readFile -- el mismo patrón robusto (cwrap + FS) que loadState()
+  // ya usa con éxito para restaurar. No es un snapshot exacto de la
+  // partida en curso (no incluye el estado de la CPU/vídeo a mitad de
+  // frame), pero para cualquier juego con guardado interno (la inmensa
+  // mayoría de Mega Drive/SNES/N64 con batería) SÍ persiste el progreso
+  // real del jugador, en vez de dejar el guardado completamente roto.
+  /**
+   * Guarda la partida actual en Firebase con el nombre elegido por el
+   * usuario (p.ej. "partida naves 1"), como una entrada más de su
+   * "memory card" personal ligada a su cuenta. Es el ÚNICO mecanismo de
+   * guardado de RetroPlay -- lo dispara el botón "Guardar partida" de la
+   * topbar, que pide el nombre antes de llamar aquí.
+   */
+  async saveState(name) {
+    if (!this.currentGame) throw new Error('No hay ningún juego activo.');
+    if (!name || !name.trim()) throw new Error('La partida necesita un nombre.');
+    const instance = await this._waitForGameManager();
+    if (!instance) {
       throw new Error('El emulador todavía no está listo para guardar.');
     }
-    const stateBytes = instance.gameManager.getState();
-    const base64 = this._bytesToBase64(stateBytes);
-    await retroStorage.saveEmulatorState(this.currentGame.id, slot, base64);
-    await retroStorage.recordPlayed(this.currentGame.id, 100);
-    return true;
+    const gameManager = instance.gameManager;
+
+    // Camino principal: snapshot completo de memoria (posición exacta
+    // dentro de la partida). Es el único que soporta continuar
+    // literalmente donde lo dejaste, así que se intenta siempre primero.
+    if (typeof gameManager.getState === 'function') {
+      try {
+        const stateBytes = gameManager.getState();
+        const base64 = this._bytesToBase64(stateBytes);
+        const record = await retroStorage.saveEmulatorState(this.currentGame, name, base64, 'state');
+        await retroStorage.recordPlayed(this.currentGame.id, 100);
+        return record;
+      } catch (err) {
+        // No relanzamos todavía: para eso está el fallback de abajo.
+        // Pero SÍ se registra con detalle -- este catch es precisamente
+        // el que faltaba antes y dejaba el fallo invisible salvo con
+        // devtools abiertas.
+        saveVerifyError('getState() falló al guardar', this.currentGame.id, name, err);
+      }
+    } else {
+      saveVerifyLog('gameManager.getState no existe en este core; se usa el fallback de SRAM directamente para', this.currentGame.id, name);
+    }
+
+    // Fallback: partida guardada tipo pila/batería, vía cmd_savefiles +
+    // FS.readFile. No depende de Module.EmulatorJSGetState.
+    if (typeof gameManager.getSaveFile === 'function') {
+      try {
+        const saveBytes = gameManager.getSaveFile();
+        if (saveBytes && saveBytes.length) {
+          const base64 = this._bytesToBase64(saveBytes);
+          const record = await retroStorage.saveEmulatorState(this.currentGame, name, base64, 'sram');
+          await retroStorage.recordPlayed(this.currentGame.id, 100);
+          saveVerifyLog('Guardado como partida SRAM (fallback, sin snapshot completo) para', this.currentGame.id, name);
+          this._notifyUser?.('Guardado el progreso de la partida guardada del juego (no la posición exacta en pantalla): este core no admite snapshots completos ahora mismo.');
+          return record;
+        }
+        saveVerifyError('getSaveFile() no devolvió datos (el juego no tiene partida guardada interna) para', this.currentGame.id, name);
+      } catch (err) {
+        saveVerifyError('getSaveFile() también falló al guardar', this.currentGame.id, name, err);
+      }
+    }
+
+    throw new Error('El emulador no pudo guardar la partida: ni el snapshot completo ni la partida guardada interna están disponibles para este core ahora mismo.');
   }
 
-  async loadState(slot = 'auto') {
+  /**
+   * Carga una partida previamente guardada en Firebase a partir de su
+   * identificador (id del documento en Firestore, ver storage.js). Es el
+   * ÚNICO mecanismo de carga de RetroPlay -- lo dispara el botón "Cargar
+   * partida" de la topbar, tras elegir el usuario un nombre de su lista.
+   */
+  async loadState(saveId) {
     if (!this.currentGame) throw new Error('No hay ningún juego activo.');
-    const record = await retroStorage.loadEmulatorState(this.currentGame.id, slot);
-    if (!record) throw new Error('No hay ninguna partida guardada para este juego.');
-    const instance = this.getEmulatorInstance();
-    if (instance?.gameManager?.loadState) {
-      const bytes = this._base64ToBytes(record.data);
-      instance.gameManager.loadState(bytes);
+    if (!saveId) throw new Error('No se indicó qué partida cargar.');
+    const record = await retroStorage.loadEmulatorState(saveId);
+    if (!record) throw new Error('No se encontró esa partida guardada.');
+    const instance = await this._waitForGameManager();
+    if (!instance) {
+      throw new Error('El emulador todavía no está listo para cargar.');
+    }
+    const gameManager = instance.gameManager;
+    const bytes = this._base64ToBytes(record.data);
+
+    // "kind" distingue snapshots completos (guardados con getState) de
+    // volcados de SRAM (guardados con el fallback getSaveFile).
+    if (record.kind === 'sram') {
+      if (typeof gameManager.loadSaveFiles !== 'function') {
+        throw new Error('Este core no puede restaurar la partida guardada (SRAM).');
+      }
+      gameManager.FS.writeFile(gameManager.getSaveFilePath(), bytes);
+      gameManager.loadSaveFiles();
+    } else if (typeof gameManager.loadState === 'function') {
+      gameManager.loadState(bytes);
+    } else {
+      throw new Error('Este core no puede restaurar partidas guardadas ahora mismo.');
     }
     return record;
+  }
+
+  // [SAVE-VERIFY] gameManager puede tardar en aparecer tras el arranque,
+  // especialmente en cores pesados como PS1 o N64. Reintenta brevemente
+  // antes de rendirse, en vez de fallar a la primera comprobación.
+  async _waitForGameManager(maxAttempts = 10, delayMs = 200) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const instance = this.getEmulatorInstance();
+      if (instance?.gameManager) return instance;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    return this.getEmulatorInstance()?.gameManager ? this.getEmulatorInstance() : null;
   }
 
   /**
@@ -644,11 +824,12 @@ class EmulatorController {
   // ---------------------------------------------------------------------
   // Cierre / limpieza
   // ---------------------------------------------------------------------
-  async close({ autoSave = true } = {}) {
-    const instance = this.getEmulatorInstance();
-    if (autoSave && this.currentGame && instance?.gameManager?.getState) {
-      try { await this.saveState('auto'); } catch (_) { /* el core puede no soportar save-state */ }
-    }
+  //
+  // No existe ningún autoguardado -- ni periódico ni al cerrar el juego.
+  // El progreso solo se persiste cuando el usuario pulsa explícitamente
+  // "Guardar partida" y le pone un nombre (ver saveState()). close() se
+  // limita a liberar recursos.
+  async close() {
     clearInterval(this._bootLogTimer);
     clearTimeout(this._startTimeout);
     this._startTimeout = null;
@@ -671,4 +852,8 @@ class EmulatorController {
 }
 
 // Instancia global -- un único controlador de emulación activo a la vez.
+// No hay ningún listener de autoguardado (ni pagehide, ni periódico):
+// cerrar la pestaña, recargar o salir del juego sin haber pulsado
+// "Guardar partida" NO persiste nada, por diseño -- el guardado es
+// siempre una acción explícita del usuario, con nombre elegido por él.
 const emulatorController = new EmulatorController();
