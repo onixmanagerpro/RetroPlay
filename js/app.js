@@ -637,61 +637,111 @@ async function triggerDownload(game) {
   });
 
   try {
-    // game.file puede ser un string (un solo archivo, comportamiento de
-    // siempre) o un array (juego multi-archivo, p.ej. PS1 .cue+.bin).
-    // resolveGameFileEntries() normaliza ambos casos a una lista de
-    // { name, url } ya resueltos (github-release://... o ruta local
-    // indistintamente -- ver js/github-release-source.js). Para
-    // descargar, cada archivo se guarda por separado con su nombre real,
-    // porque en el navegador no podemos "reunirlos en una carpeta": el
-    // usuario necesita el .cue y el/los .bin juntos en la misma carpeta
-    // local para poder usarlos luego en un emulador de escritorio.
-    const entries = await window.resolveGameFileEntries(game.file);
-    const isMulti = entries.length > 1;
-
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      const res = await fetch(entry.url);
-      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} al descargar ${entry.name}`);
-
-      const total = Number(res.headers.get('content-length')) || 0;
-      const reader = res.body.getReader();
-      const chunks = [];
-      let received = 0;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        received += value.length;
-        if (total) {
-          // Con varios archivos, cada uno ocupa su propio tramo del 0-100%
-          // para que la barra de progreso avance de forma continua en vez
-          // de reiniciar a 0 entre archivo y archivo.
-          const fileProgress = received / total;
-          const overallProgress = ((i + fileProgress) / entries.length) * 100;
-          updateToastProgress(game.id, Math.min(100, overallProgress));
-        }
-      }
-
-      const blob = new Blob(chunks);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = entry.name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+    // game.file puede ser:
+    //   - un objeto { source: 'google-drive', ... }: el catálogo actual
+    //     de RetroPlay (22 de 23 juegos). Estos NUNCA deben pasar por
+    //     resolveGameFileEntries(): esa función asume que cada
+    //     referencia es un string (ref.split('/')...), y un objeto de
+    //     Drive rompe ahí mismo con un TypeError antes de llegar siquiera
+    //     a intentar un fetch. window.loadGoogleDriveGameFiles() (ver
+    //     js/google-drive-source.js) es quien sabe resolver esta forma,
+    //     incluida la variante multi-archivo { cue, files } de los CUE de
+    //     PS1 -- es el mismo chequeo que ya usa emulator.js en launch()
+    //     para decidir cómo cargar el juego al jugar online, aplicado
+    //     aquí también para descargar.
+    //   - un string o un array de strings (github-release://... o ruta
+    //     local): comportamiento de siempre, sin tocar.
+    if (window.isGoogleDriveGameSource?.(game.file)) {
+      await downloadGoogleDriveGame(game);
+    } else {
+      await downloadResolvedEntries(game, await window.resolveGameFileEntries(game.file));
     }
-
-    finishToast(game.id, true, null, isMulti
-      ? `Descargados ${entries.length} archivos -- guárdalos juntos en la misma carpeta.`
-      : null);
   } catch (err) {
     console.warn('[downloads]', err);
     finishToast(game.id, false, err.message || 'No se encontró el archivo. Añade el archivo real en /downloads y actualiza data/games.json, o revisa la referencia github-release://.');
   }
+}
+
+// Descarga vía fetch() por streaming, para game.file en formato
+// github-release://... o ruta local (comportamiento previo, intacto).
+async function downloadResolvedEntries(game, entries) {
+  const isMulti = entries.length > 1;
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const res = await fetch(entry.url);
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} al descargar ${entry.name}`);
+
+    const total = Number(res.headers.get('content-length')) || 0;
+    const reader = res.body.getReader();
+    const chunks = [];
+    let received = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      if (total) {
+        // Con varios archivos, cada uno ocupa su propio tramo del 0-100%
+        // para que la barra de progreso avance de forma continua en vez
+        // de reiniciar a 0 entre archivo y archivo.
+        const fileProgress = received / total;
+        const overallProgress = ((i + fileProgress) / entries.length) * 100;
+        updateToastProgress(game.id, Math.min(100, overallProgress));
+      }
+    }
+
+    downloadBlob(new Blob(chunks), entry.name);
+  }
+
+  finishToast(game.id, true, null, isMulti
+    ? `Descargados ${entries.length} archivos -- guárdalos juntos en la misma carpeta.`
+    : null);
+}
+
+// Descarga vía loadGoogleDriveGameFiles() para game.file en formato
+// { source: 'google-drive', ... }, simple o { cue, files }. A
+// diferencia del streaming por fetch() de arriba, aquí los bytes llegan
+// como Blob ya completo (ver fetchGoogleDriveBlob en
+// js/google-drive-source.js), así que el progreso se marca por archivo
+// completado en vez de por bytes recibidos -- no hay content-length
+// intermedio que leer durante la descarga de cada uno.
+async function downloadGoogleDriveGame(game) {
+  const assets = await window.loadGoogleDriveGameFiles(game.file, {
+    onProgress: (message) => {
+      const el = document.getElementById(`toast-${game.id}`);
+      const sub = el?.querySelector('.toast-sub');
+      if (sub) sub.textContent = message;
+    }
+  });
+
+  try {
+    const files = [assets.main, ...assets.companions];
+    const isMulti = files.length > 1;
+
+    for (let i = 0; i < files.length; i++) {
+      downloadBlob(files[i].blob, files[i].mountedName || files[i].name);
+      updateToastProgress(game.id, ((i + 1) / files.length) * 100);
+    }
+
+    finishToast(game.id, true, null, isMulti
+      ? `Descargados ${files.length} archivos -- guárdalos juntos en la misma carpeta.`
+      : null);
+  } finally {
+    assets.release();
+  }
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function showToast({ id, title, sub }) {
