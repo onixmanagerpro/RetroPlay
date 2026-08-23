@@ -408,6 +408,18 @@ class RetroPlayStorage {
       return record;
     } catch (err) {
       saveVerifyError('Firebase: FALLÓ al guardar la partida', `"${cleanName}"`, game.id, err);
+      // [SAVE-VERIFY] El SDK de Firebase siempre da el mensaje en inglés
+      // (p.ej. "Missing or insufficient permissions.") y no dice cómo
+      // solucionarlo. Se traducen los códigos más habituales a un aviso
+      // accionable en español; el error original ya quedó registrado tal
+      // cual arriba para depurar. Cualquier otro código (red, cuota...)
+      // sigue propagándose sin modificar, como antes.
+      if (err && err.code === 'permission-denied') {
+        throw new Error('Firebase rechazó el guardado por falta de permisos. Revisa las reglas de seguridad de Firestore en la consola de tu proyecto (ver el comentario al principio de storage.js).');
+      }
+      if (err && err.code === 'unauthenticated') {
+        throw new Error('Tu sesión ha caducado. Vuelve a iniciar sesión e inténtalo de nuevo.');
+      }
       throw err;
     }
   }
