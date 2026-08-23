@@ -3,49 +3,71 @@
  * -----------------------------------------------------------------------
  * Capa de persistencia de RetroPlay.
  *
- * Por defecto TODO se guarda en IndexedDB, en local, sin backend ni cuenta.
- * Esto cumple el requisito de "app principalmente estática, sin backend
- * salvo que sea necesario más adelante".
+ * PARTIDAS GUARDADAS ("save states"): viven EXCLUSIVAMENTE en Firebase
+ * (Auth + Firestore), como una "memory card" personal ligada a la cuenta
+ * del usuario. No hay IndexedDB, no hay localStorage, no hay autosave:
+ * la única forma de guardar o cargar una partida es a través del botón
+ * "Guardar partida" (pide un nombre elegido por el usuario, p.ej.
+ * "partida naves 1") y el botón "Cargar partida" (lista esas partidas
+ * por nombre) de la topbar del emulador. Ver RetroPlayStorage más abajo.
  *
- * Se incluye además un adaptador opcional de Firebase (ver FirebaseAdapter
- * al final del archivo) para el día que se quiera sincronizar partidas
- * entre dispositivos con una cuenta (Google / email). Está DESACTIVADO
- * por defecto (RETROPLAY_CONFIG.useFirebase = false) precisamente porque
- * añadir autenticación real es una decisión de producto — y de costes de
- * infraestructura — que se debe tomar de forma explícita, no como opción
- * por defecto de una plantilla.
- *
- * Para activarlo:
+ * Para activar Firebase:
  *   1. Crear un proyecto en https://console.firebase.google.com
- *   2. Rellenar RETROPLAY_CONFIG.firebase con las credenciales del proyecto
- *   3. Poner RETROPLAY_CONFIG.useFirebase = true
- *   4. Incluir los SDK de Firebase (firebase-app, firebase-auth,
- *      firebase-firestore) antes de este script en index.html
+ *   2. Activar Authentication -> Sign-in method -> Google y Email/contraseña
+ *   3. Crear una base de datos Firestore (modo producción)
+ *   4. Rellenar FIREBASE_CONFIG más abajo con las credenciales del proyecto
+ *      (Configuración del proyecto -> Tus apps -> SDK de configuración)
+ *   5. Reglas de seguridad recomendadas en Firestore (cada usuario solo
+ *      puede leer/escribir sus propias partidas):
+ *        rules_version = '2';
+ *        service cloud.firestore {
+ *          match /databases/{database}/documents {
+ *            match /users/{userId}/saveStates/{saveId} {
+ *              allow read, write: if request.auth != null && request.auth.uid == userId;
+ *            }
+ *          }
+ *        }
+ *
+ * OTRAS FUNCIONALIDADES (favoritos, "recientemente jugado", configuración
+ * de mando) siguen guardándose localmente en IndexedDB: no son "partidas"
+ * y el usuario no pidió tocarlas.
  * -----------------------------------------------------------------------
  */
 
-const RETROPLAY_CONFIG = {
-  useFirebase: false, // ⚠️ Cambiar a true solo tras configurar Firebase (ver arriba)
-  firebase: {
-    apiKey: '',
-    authDomain: '',
-    projectId: '',
-    storageBucket: '',
-    messagingSenderId: '',
-    appId: ''
-  }
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyA5wcZXzitPt8CE15cvKEwzTRnsT8xW8KM',
+  authDomain: 'inframe-capture.firebaseapp.com',
+  databaseURL: 'https://inframe-capture-default-rtdb.europe-west1.firebasedatabase.app',
+  projectId: 'inframe-capture',
+  storageBucket: 'inframe-capture.firebasestorage.app',
+  messagingSenderId: '866171827071',
+  appId: '1:866171827071:web:4c1affa83d63a6bdb3a04a',
+  measurementId: 'G-2Y1GK0KPHC'
 };
 
 const DB_NAME = 'retroplay-db';
 const DB_VERSION = 1;
 
 const STORES = {
-  favorites: 'favorites',       // { gameId, addedAt }
+  favorites: 'favorites',           // { gameId, addedAt }
   recentlyPlayed: 'recentlyPlayed', // { gameId, lastPlayedAt, progressPct }
-  saveStates: 'saveStates',     // { id: `${gameId}::slot`, gameId, slot, data (blob/base64), updatedAt }
-  gamepadConfig: 'gamepadConfig', // { id: 'default' | padId, mapping }
-  settings: 'settings'          // { key, value }
+  gamepadConfig: 'gamepadConfig',   // { id: 'default' | padId, mapping }
+  settings: 'settings'              // { key, value }
 };
+
+// -----------------------------------------------------------------------
+// [SAVE-VERIFY] Prefijo de log reservado exclusivamente para la ruta de
+// guardado/carga de partidas. Cualquier fallo en esta ruta se reporta
+// aquí SIEMPRE -- nunca se traga en un catch vacío -- para que un bug de
+// persistencia sea visible en la consola en el momento en que ocurre, no
+// descubierto días después al perder una partida.
+// -----------------------------------------------------------------------
+function saveVerifyLog(...args) {
+  console.log('[SAVE-VERIFY]', ...args);
+}
+function saveVerifyError(...args) {
+  console.error('[SAVE-VERIFY]', ...args);
+}
 
 class LocalStorageAdapter {
   constructor() {
@@ -54,7 +76,7 @@ class LocalStorageAdapter {
   }
 
   _open() {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       if (!('indexedDB' in window)) {
         console.warn('[storage] IndexedDB no disponible en este navegador. Se usará memoria volátil.');
         this._memoryFallback = this._buildMemoryFallback();
@@ -71,9 +93,6 @@ class LocalStorageAdapter {
         }
         if (!db.objectStoreNames.contains(STORES.recentlyPlayed)) {
           db.createObjectStore(STORES.recentlyPlayed, { keyPath: 'gameId' });
-        }
-        if (!db.objectStoreNames.contains(STORES.saveStates)) {
-          db.createObjectStore(STORES.saveStates, { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains(STORES.gamepadConfig)) {
           db.createObjectStore(STORES.gamepadConfig, { keyPath: 'id' });
@@ -158,15 +177,171 @@ class LocalStorageAdapter {
 }
 
 /**
+ * Adaptador de Firebase. Es OBLIGATORIO para guardar/cargar partidas:
+ * sin sesión iniciada no hay memory card a la que escribir ni leer. Se
+ * instancia siempre que el SDK de Firebase esté cargado en la página
+ * (ver los <script> en index.html), independientemente de las demás
+ * funcionalidades de la app (favoritos, etc.), que no dependen de esto.
+ */
+class FirebaseAdapter {
+  constructor(config) {
+    if (typeof firebase === 'undefined') {
+      console.error('[storage] El SDK de Firebase no está cargado. Añade los <script> de Firebase antes de storage.js en index.html.');
+      this.enabled = false;
+      return;
+    }
+    this.app = firebase.apps && firebase.apps.length ? firebase.app() : firebase.initializeApp(config);
+    this.auth = firebase.auth();
+    this.db = firebase.firestore();
+    this.enabled = true;
+    this.user = null;
+    this._authReady = new Promise((resolve) => {
+      const unsub = this.auth.onAuthStateChanged((u) => {
+        this.user = u;
+        resolve(u);
+        unsub();
+      });
+    });
+    this.auth.onAuthStateChanged((u) => { this.user = u; });
+  }
+
+  /** Espera a que Firebase Auth resuelva el estado de sesión inicial. */
+  async waitForAuthReady() {
+    if (!this.enabled) return null;
+    return this._authReady;
+  }
+
+  isSignedIn() {
+    return !!(this.enabled && this.user);
+  }
+
+  onAuthStateChanged(cb) {
+    if (!this.enabled) return () => {};
+    return this.auth.onAuthStateChanged(cb);
+  }
+
+  async signInWithGoogle() {
+    if (!this.enabled) throw new Error('Firebase no está configurado.');
+    const provider = new firebase.auth.GoogleAuthProvider();
+    const res = await this.auth.signInWithPopup(provider);
+    return res.user;
+  }
+
+  async signInWithEmail(email, password) {
+    if (!this.enabled) throw new Error('Firebase no está configurado.');
+    const res = await this.auth.signInWithEmailAndPassword(email, password);
+    return res.user;
+  }
+
+  async registerWithEmail(email, password) {
+    if (!this.enabled) throw new Error('Firebase no está configurado.');
+    const res = await this.auth.createUserWithEmailAndPassword(email, password);
+    return res.user;
+  }
+
+  async signOut() {
+    if (!this.enabled) return;
+    return this.auth.signOut();
+  }
+
+  _requireUser() {
+    if (!this.enabled) throw new Error('Firebase no está configurado.');
+    if (!this.user) throw new Error('Debes iniciar sesión para guardar o cargar partidas.');
+    return this.user;
+  }
+
+  _saveStatesCol() {
+    const user = this._requireUser();
+    return this.db.collection('users').doc(user.uid).collection('saveStates');
+  }
+
+  /**
+   * Guarda una partida nueva con el nombre elegido por el usuario, como
+   * una entrada más de su memory card en Firestore. Cada guardado crea
+   * un documento propio (no sobrescribe por juego) -- así el usuario
+   * puede tener "partida naves 1", "partida naves 2", "juego retro 2",
+   * etc., todas a la vez, tal como pidió.
+   */
+  async createSaveState({ gameId, gameName, consoleId, name, data, kind }) {
+    const col = this._saveStatesCol();
+    const docRef = col.doc();
+    const record = {
+      id: docRef.id,
+      gameId,
+      gameName: gameName || gameId,
+      consoleId: consoleId || null,
+      name,
+      data,
+      kind: kind || 'state',
+      updatedAt: Date.now()
+    };
+    await docRef.set(record);
+    return record;
+  }
+
+  /** Todas las partidas guardadas del usuario, sin importar el juego. */
+  async listSaveStates() {
+    const col = this._saveStatesCol();
+    const snap = await col.orderBy('updatedAt', 'desc').get();
+    return snap.docs.map(d => d.data());
+  }
+
+  async getSaveState(saveId) {
+    const col = this._saveStatesCol();
+    const doc = await col.doc(saveId).get();
+    return doc.exists ? doc.data() : null;
+  }
+
+  async deleteSaveState(saveId) {
+    const col = this._saveStatesCol();
+    await col.doc(saveId).delete();
+  }
+}
+
+/**
  * API pública de persistencia usada por el resto de la app.
- * Envuelve LocalStorageAdapter (y, si algún día se activa, FirebaseAdapter)
- * para que app.js / library.js / emulator.js / gamepad.js no necesiten
- * saber de dónde vienen realmente los datos.
  */
 class RetroPlayStorage {
   constructor() {
     this.local = new LocalStorageAdapter();
-    this.remote = RETROPLAY_CONFIG.useFirebase ? new FirebaseAdapter(RETROPLAY_CONFIG.firebase) : null;
+    this.firebase = new FirebaseAdapter(FIREBASE_CONFIG);
+  }
+
+  // ---------- Sesión ----------
+  get isFirebaseReady() {
+    return this.firebase.enabled;
+  }
+
+  isSignedIn() {
+    return this.firebase.isSignedIn();
+  }
+
+  currentUser() {
+    return this.firebase.user;
+  }
+
+  waitForAuthReady() {
+    return this.firebase.waitForAuthReady();
+  }
+
+  onAuthStateChanged(cb) {
+    return this.firebase.onAuthStateChanged(cb);
+  }
+
+  signInWithGoogle() {
+    return this.firebase.signInWithGoogle();
+  }
+
+  signInWithEmail(email, password) {
+    return this.firebase.signInWithEmail(email, password);
+  }
+
+  registerWithEmail(email, password) {
+    return this.firebase.registerWithEmail(email, password);
+  }
+
+  signOut() {
+    return this.firebase.signOut();
   }
 
   // ---------- Favoritos ----------
@@ -196,7 +371,6 @@ class RetroPlayStorage {
       lastPlayedAt: Date.now(),
       progressPct
     });
-    if (this.remote) this.remote.syncRecentlyPlayed(gameId, progressPct).catch(() => {});
   }
 
   async getRecentlyPlayed(limit = 10) {
@@ -204,28 +378,74 @@ class RetroPlayStorage {
     return all.sort((a, b) => b.lastPlayedAt - a.lastPlayedAt).slice(0, limit);
   }
 
-  // ---------- Estados de guardado del emulador ----------
-  async saveEmulatorState(gameId, slot, data) {
-    const record = { id: `${gameId}::${slot}`, gameId, slot, data, updatedAt: Date.now() };
-    await this.local.put(STORES.saveStates, record);
-    if (this.remote) this.remote.uploadSaveState(record).catch(() => {});
-    return record;
+  // ---------- Partidas guardadas (memory card en Firebase) ----------
+  //
+  // Único mecanismo de guardado/carga de RetroPlay. No hay slots, no hay
+  // "auto", no hay IndexedDB ni localStorage de por medio: cada partida
+  // guardada es un documento en Firestore, bajo la cuenta del usuario,
+  // identificado por el NOMBRE que él mismo eligió al guardar.
+  //
+  // [SAVE-VERIFY] Si Firebase no está configurado o el usuario no ha
+  // iniciado sesión, esto lanza en vez de fallar en silencio -- la capa
+  // de UI (emulator.js / app.js) es responsable de mostrar ese error.
+  async saveEmulatorState(game, name, data, kind = 'state') {
+    const cleanName = (name || '').trim();
+    if (!cleanName) {
+      const err = new Error('La partida necesita un nombre.');
+      saveVerifyError(err.message);
+      throw err;
+    }
+    try {
+      const record = await this.firebase.createSaveState({
+        gameId: game.id,
+        gameName: game.name || game.title || game.id,
+        consoleId: game.console,
+        name: cleanName,
+        data,
+        kind
+      });
+      saveVerifyLog('Firebase: partida guardada', `"${cleanName}"`, game.id, `(${data.length} chars base64)`);
+      return record;
+    } catch (err) {
+      saveVerifyError('Firebase: FALLÓ al guardar la partida', `"${cleanName}"`, game.id, err);
+      throw err;
+    }
   }
 
-  async loadEmulatorState(gameId, slot = 'auto') {
-    return this.local.get(STORES.saveStates, `${gameId}::${slot}`);
+  async loadEmulatorState(saveId) {
+    try {
+      const record = await this.firebase.getSaveState(saveId);
+      if (record) {
+        saveVerifyLog('Firebase: partida cargada', `"${record.name}"`, record.gameId, `(${record.data.length} chars base64)`);
+      } else {
+        saveVerifyLog('Firebase: no se encontró la partida', saveId);
+      }
+      return record;
+    } catch (err) {
+      saveVerifyError('Firebase: FALLÓ al cargar la partida', saveId, err);
+      throw err;
+    }
   }
 
+  /** Todas las partidas guardadas del usuario (cualquier juego). */
+  async listAllSaveStates() {
+    return this.firebase.listSaveStates();
+  }
+
+  /** Partidas guardadas del usuario para un juego concreto. */
   async listSaveStatesForGame(gameId) {
-    const all = await this.local.getAll(STORES.saveStates);
-    return all.filter(s => s.gameId === gameId).sort((a, b) => b.updatedAt - a.updatedAt);
+    const all = await this.firebase.listSaveStates();
+    return all.filter(s => s.gameId === gameId);
+  }
+
+  async deleteSaveState(saveId) {
+    return this.firebase.deleteSaveState(saveId);
   }
 
   // ---------- Configuración de mando ----------
   async saveGamepadMapping(padProfileId, mapping) {
     const record = { id: padProfileId, mapping, updatedAt: Date.now() };
     await this.local.put(STORES.gamepadConfig, record);
-    if (this.remote) this.remote.syncGamepadConfig(record).catch(() => {});
     return record;
   }
 
@@ -241,66 +461,6 @@ class RetroPlayStorage {
   async getSetting(key, fallback = null) {
     const rec = await this.local.get(STORES.settings, key);
     return rec ? rec.value : fallback;
-  }
-}
-
-/**
- * Adaptador opcional de Firebase — NO se instancia salvo que
- * RETROPLAY_CONFIG.useFirebase sea true y los SDK de Firebase estén
- * cargados en la página. Pensado para sincronizar partidas/config
- * cuando el usuario inicia sesión con Google o correo.
- */
-class FirebaseAdapter {
-  constructor(config) {
-    if (typeof firebase === 'undefined') {
-      console.warn('[storage] useFirebase=true pero el SDK de Firebase no está cargado. Añade los <script> de Firebase antes de storage.js.');
-      this.enabled = false;
-      return;
-    }
-    this.app = firebase.initializeApp(config);
-    this.auth = firebase.auth();
-    this.db = firebase.firestore();
-    this.enabled = true;
-    this.user = null;
-    this.auth.onAuthStateChanged(u => { this.user = u; });
-  }
-
-  async signInWithGoogle() {
-    if (!this.enabled) return null;
-    const provider = new firebase.auth.GoogleAuthProvider();
-    const res = await this.auth.signInWithPopup(provider);
-    return res.user;
-  }
-
-  async signInWithEmail(email, password) {
-    if (!this.enabled) return null;
-    const res = await this.auth.signInWithEmailAndPassword(email, password);
-    return res.user;
-  }
-
-  async signOut() {
-    if (!this.enabled) return;
-    return this.auth.signOut();
-  }
-
-  _userDoc(sub) {
-    if (!this.user) throw new Error('No hay sesión iniciada');
-    return this.db.collection('users').doc(this.user.uid).collection(sub);
-  }
-
-  async uploadSaveState(record) {
-    if (!this.enabled || !this.user) return;
-    await this._userDoc('saveStates').doc(record.id).set(record);
-  }
-
-  async syncGamepadConfig(record) {
-    if (!this.enabled || !this.user) return;
-    await this._userDoc('gamepadConfig').doc(record.id).set(record);
-  }
-
-  async syncRecentlyPlayed(gameId, progressPct) {
-    if (!this.enabled || !this.user) return;
-    await this._userDoc('recentlyPlayed').doc(gameId).set({ gameId, progressPct, lastPlayedAt: Date.now() });
   }
 }
 
