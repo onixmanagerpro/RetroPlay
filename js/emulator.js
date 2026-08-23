@@ -419,24 +419,40 @@ class EmulatorController {
       // Cargar partida" de la topbar de RetroPlay (que sí persisten)
       // es la receta perfecta para el síntoma "a veces parece que
       // guarda, pero al volver no está" -- por eso se ocultan aquí.
+      //
+      // [BUG] Lo mismo aplica a "Export Save File"/"Import Save File"
+      // (descargan/suben a mano un .srm suelto, también sin pasar por
+      // retroStorage): estaban puestos a false como "saveSavefiles"/
+      // "loadSavefiles", pero las claves reales que usa EmulatorJS son
+      // "saveSavFiles"/"loadSavFiles" (con F mayúscula y sin la "e" --
+      // ver defaultButtonOptions en vendor/emulatorjs/emulator.min.js).
+      // buildButtonOptions() no reconoce una clave que no existe ni
+      // tiene alias (a diferencia de "volume", que sí es un alias real
+      // de "volumeSlider") y la descarta en silencio, sin ningún error
+      // en consola -- así que estos dos botones se quedaban con su
+      // valor por defecto (visible) pese a la intención clara de
+      // ocultarlos. Corregido abajo.
+      //
       // saveState/loadState nativos SÍ persisten correctamente (pasan
       // por callEvent -> EJS_onSaveState/EJS_onLoadState -> retroStorage,
-      // ver más abajo), así que se dejan disponibles como alternativa a
-      // los de la topbar.
+      // ver más abajo), pero para que exista una única vía de guardado/
+      // carga -- los botones "Guardar partida"/"Cargar partida" de la
+      // topbar de RetroPlay -- se ocultan también aquí en vez de
+      // dejarlos como alternativa.
       iWin.EJS_Buttons = {
         playPause: false,
         restart: true,
         mute: false,
         settings: false,   // oculta el acceso al menú de configuración del core
         fullscreen: true,
-        saveState: true,
-        loadState: true,
+        saveState: false,
+        loadState: false,
         screenRecord: false,
         gamepad: true,
         cheat: false,
         volume: true,
-        saveSavefiles: false,
-        loadSavefiles: false,
+        saveSavFiles: false,
+        loadSavFiles: false,
         quickSave: false,
         quickLoad: false,
         screenshot: false,
