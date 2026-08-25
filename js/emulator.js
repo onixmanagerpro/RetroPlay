@@ -671,119 +671,72 @@ class EmulatorController {
   // mayoría de Mega Drive/SNES/N64 con batería) SÍ persiste el progreso
   // real del jugador, en vez de dejar el guardado completamente roto.
   /**
-   * Guarda la partida actual en Firebase con el nombre elegido por el
-   * usuario (p.ej. "partida naves 1"), como una entrada más de su
-   * "memory card" personal ligada a su cuenta. Es el ÚNICO mecanismo de
-   * guardado de RetroPlay -- lo dispara el botón "Guardar partida" de la
-   * topbar, que pide el nombre antes de llamar aquí.
+   * Captura los bytes de la partida en curso directamente desde el core,
+   * SIN persistir todavía a ningún sitio. La usan tanto saveState()
+   * (persiste en local/nube) como exportStateToFile() (persiste como
+   * archivo descargable) -- así ambas comparten exactamente la misma
+   * lógica de captura y el mismo orden de prioridad.
+   *
+   * Camino principal: snapshot completo de memoria (posición exacta
+   * dentro de la partida, vía getState()). Es el único que soporta
+   * continuar literalmente donde lo dejaste, así que se intenta siempre
+   * primero. Fallback: partida guardada tipo pila/batería (SRAM), vía
+   * getSaveFile() -- no depende de Module.EmulatorJSGetState, así que
+   * sigue funcionando en cores donde el snapshot completo falla.
    */
-  async saveState(name) {
-    if (!this.currentGame) throw new Error('No hay ningún juego activo.');
-    if (!name || !name.trim()) throw new Error('La partida necesita un nombre.');
+  async _captureStateBytes() {
     const instance = await this._waitForGameManager();
     if (!instance) {
       throw new Error('El emulador todavía no está listo para guardar.');
     }
     const gameManager = instance.gameManager;
 
-    // [SAVE-VERIFY] Último fallo ocurrido al PERSISTIR en Firebase (no al
-    // generar los bytes de la partida en el core). Es la distinción
-    // clave para no reportar un error engañoso al final de esta función:
-    // si el core sí logró producir datos (snapshot o SRAM) pero Firebase
-    // rechazó guardarlos -- reglas de Firestore, sesión caducada, sin
-    // red -- el problema real es ESE y es el que debe ver el usuario, no
-    // "este core no admite guardar partidas" (que sería falso: sí pudo).
-    let persistError = null;
-
-    // Camino principal: snapshot completo de memoria (posición exacta
-    // dentro de la partida). Es el único que soporta continuar
-    // literalmente donde lo dejaste, así que se intenta siempre primero.
     if (typeof gameManager.getState === 'function') {
       try {
         const stateBytes = gameManager.getState();
-        const base64 = this._bytesToBase64(stateBytes);
-        try {
-          const record = await retroStorage.saveEmulatorState(this.currentGame, name, base64, 'state');
-          await retroStorage.recordPlayed(this.currentGame.id, 100);
-          return record;
-        } catch (err) {
-          // El core SÍ generó el snapshot -- esto es un fallo de Firebase,
-          // no del emulador. Se guarda para reportarlo tal cual al final
-          // si el fallback de SRAM tampoco consigue persistir.
-          persistError = err;
-          saveVerifyError('Firebase rechazó el guardado del snapshot completo', this.currentGame.id, name, err);
+        if (stateBytes && stateBytes.length) {
+          saveVerifyLog('Snapshot completo capturado (getState) para', this.currentGame?.id);
+          return { bytes: stateBytes, kind: 'state' };
         }
+        saveVerifyError('getState() devolvió datos vacíos para', this.currentGame?.id);
       } catch (err) {
-        // No relanzamos todavía: para eso está el fallback de abajo.
-        // Pero SÍ se registra con detalle -- este catch es precisamente
-        // el que faltaba antes y dejaba el fallo invisible salvo con
-        // devtools abiertas.
-        saveVerifyError('getState() falló al guardar', this.currentGame.id, name, err);
+        saveVerifyError('getState() falló al capturar snapshot', this.currentGame?.id, err);
       }
     } else {
-      saveVerifyLog('gameManager.getState no existe en este core; se usa el fallback de SRAM directamente para', this.currentGame.id, name);
+      saveVerifyLog('gameManager.getState no existe en este core; se usa el fallback de SRAM directamente para', this.currentGame?.id);
     }
 
-    // Fallback: partida guardada tipo pila/batería, vía cmd_savefiles +
-    // FS.readFile. No depende de Module.EmulatorJSGetState.
     if (typeof gameManager.getSaveFile === 'function') {
       try {
         const saveBytes = gameManager.getSaveFile();
         if (saveBytes && saveBytes.length) {
-          const base64 = this._bytesToBase64(saveBytes);
-          try {
-            const record = await retroStorage.saveEmulatorState(this.currentGame, name, base64, 'sram');
-            await retroStorage.recordPlayed(this.currentGame.id, 100);
-            saveVerifyLog('Guardado como partida SRAM (fallback, sin snapshot completo) para', this.currentGame.id, name);
-            this._notifyUser?.('Guardado el progreso de la partida guardada del juego (no la posición exacta en pantalla): este core no admite snapshots completos ahora mismo.');
-            return record;
-          } catch (err) {
-            // Igual que arriba: el core SÍ generó los datos de SRAM, así
-            // que un fallo aquí es de Firebase, no del core.
-            persistError = err;
-            saveVerifyError('Firebase rechazó el guardado de la SRAM', this.currentGame.id, name, err);
-          }
-        } else {
-          saveVerifyError('getSaveFile() no devolvió datos (el juego no tiene partida guardada interna) para', this.currentGame.id, name);
+          saveVerifyLog('Partida guardada SRAM capturada (fallback, sin snapshot completo) para', this.currentGame?.id);
+          return { bytes: saveBytes, kind: 'sram' };
         }
+        saveVerifyError('getSaveFile() no devolvió datos (el juego no tiene partida guardada interna) para', this.currentGame?.id);
       } catch (err) {
-        saveVerifyError('getSaveFile() también falló al guardar', this.currentGame.id, name, err);
+        saveVerifyError('getSaveFile() también falló al capturar', this.currentGame?.id, err);
       }
     }
 
-    // [SAVE-VERIFY] Si el core llegó a generar los datos de la partida y
-    // lo único que falló fue persistirlos en Firebase, ese es el error
-    // real (p.ej. "Missing or insufficient permissions" de Firestore) y
-    // se propaga tal cual -- es mucho más accionable para el usuario que
-    // el mensaje genérico de abajo, y evita hacerle pensar que el
-    // problema es el core/la consola cuando en realidad es la
-    // configuración de Firebase.
-    if (persistError) throw persistError;
-
-    throw new Error('El emulador no pudo guardar la partida: ni el snapshot completo ni la partida guardada interna están disponibles para este core ahora mismo.');
+    throw new Error('El emulador no pudo generar los datos de la partida: ni el snapshot completo ni la partida guardada interna están disponibles para este core ahora mismo.');
   }
 
   /**
-   * Carga una partida previamente guardada en Firebase a partir de su
-   * identificador (id del documento en Firestore, ver storage.js). Es el
-   * ÚNICO mecanismo de carga de RetroPlay -- lo dispara el botón "Cargar
-   * partida" de la topbar, tras elegir el usuario un nombre de su lista.
+   * Aplica unos bytes de partida (ya capturados antes, vengan de
+   * local/nube o de un archivo importado) al core activo. La usan tanto
+   * loadState() como importStateFromFile().
    */
-  async loadState(saveId) {
-    if (!this.currentGame) throw new Error('No hay ningún juego activo.');
-    if (!saveId) throw new Error('No se indicó qué partida cargar.');
-    const record = await retroStorage.loadEmulatorState(saveId);
-    if (!record) throw new Error('No se encontró esa partida guardada.');
+  async _applyStateBytes(bytes, kind) {
     const instance = await this._waitForGameManager();
     if (!instance) {
       throw new Error('El emulador todavía no está listo para cargar.');
     }
     const gameManager = instance.gameManager;
-    const bytes = this._base64ToBytes(record.data);
 
-    // "kind" distingue snapshots completos (guardados con getState) de
-    // volcados de SRAM (guardados con el fallback getSaveFile).
-    if (record.kind === 'sram') {
+    // "kind" distingue snapshots completos (capturados con getState) de
+    // volcados de SRAM (capturados con el fallback getSaveFile).
+    if (kind === 'sram') {
       if (typeof gameManager.loadSaveFiles !== 'function') {
         throw new Error('Este core no puede restaurar la partida guardada (SRAM).');
       }
@@ -794,7 +747,97 @@ class EmulatorController {
     } else {
       throw new Error('Este core no puede restaurar partidas guardadas ahora mismo.');
     }
+  }
+
+  /**
+   * Guarda la partida actual con el nombre elegido por el usuario (p.ej.
+   * "partida naves 1"). Se persiste SIEMPRE en local (este navegador, sin
+   * necesidad de sesión ni de red) y, si hay sesión de Firebase iniciada,
+   * también en la nube como respaldo (ver storage.js). Lo dispara el
+   * botón "Guardar partida" de la topbar, que pide el nombre antes de
+   * llamar aquí.
+   */
+  async saveState(name) {
+    if (!this.currentGame) throw new Error('No hay ningún juego activo.');
+    if (!name || !name.trim()) throw new Error('La partida necesita un nombre.');
+
+    const { bytes, kind } = await this._captureStateBytes();
+    const base64 = this._bytesToBase64(bytes);
+    const record = await retroStorage.saveEmulatorState(this.currentGame, name, base64, kind);
+    await retroStorage.recordPlayed(this.currentGame.id, 100);
+
+    if (kind === 'sram') {
+      this._notifyUser?.('Guardado el progreso de la partida guardada del juego (no la posición exacta en pantalla): este core no admite snapshots completos ahora mismo.');
+    }
     return record;
+  }
+
+  /**
+   * Carga una partida previamente guardada (local o de la nube) a partir
+   * de su identificador (ver storage.js: loadEmulatorState busca primero
+   * en local y usa Firebase como respaldo). Lo dispara el botón "Cargar
+   * partida" de la topbar, tras elegir el usuario un nombre de su lista.
+   */
+  async loadState(saveId) {
+    if (!this.currentGame) throw new Error('No hay ningún juego activo.');
+    if (!saveId) throw new Error('No se indicó qué partida cargar.');
+    const record = await retroStorage.loadEmulatorState(saveId);
+    if (!record) throw new Error('No se encontró esa partida guardada.');
+    const bytes = this._base64ToBytes(record.data);
+    await this._applyStateBytes(bytes, record.kind);
+    return record;
+  }
+
+  /**
+   * Captura la partida actual y la descarga como archivo .json en vez de
+   * guardarla en local/nube -- la tercera vía de persistencia que pidió
+   * el usuario, independiente de todo lo demás. Lo dispara el botón
+   * "Descargar como archivo" del modal de guardado.
+   */
+  async exportStateToFile(name) {
+    if (!this.currentGame) throw new Error('No hay ningún juego activo.');
+    const cleanName = (name || '').trim() || `${this.currentGame.name || this.currentGame.id} ${new Date().toLocaleString()}`;
+    const { bytes, kind } = await this._captureStateBytes();
+    const base64 = this._bytesToBase64(bytes);
+    const payload = retroStorage.downloadSaveStateFile({
+      gameId: this.currentGame.id,
+      gameName: this.currentGame.name || this.currentGame.title || this.currentGame.id,
+      consoleId: this.currentGame.console,
+      name: cleanName,
+      kind,
+      data: base64
+    });
+    if (kind === 'sram') {
+      this._notifyUser?.('Exportado el progreso de la partida guardada del juego (no la posición exacta en pantalla): este core no admite snapshots completos ahora mismo.');
+    }
+    return payload;
+  }
+
+  /**
+   * Carga una partida desde un archivo .json exportado antes (con
+   * exportStateToFile() o descargado desde el listado de "Cargar
+   * partida"). Aplica el estado directamente al juego en curso y,
+   * además, la indexa en local para que a partir de ahora también
+   * aparezca en el listado normal sin tener que reimportar el archivo.
+   */
+  async importStateFromFile(file) {
+    if (!this.currentGame) throw new Error('No hay ningún juego activo.');
+    const payload = await retroStorage.readSaveStateFile(file);
+
+    if (payload.gameId && payload.gameId !== this.currentGame.id) {
+      throw new Error(`Ese archivo es de otro juego (${payload.gameName || payload.gameId}). Abre ese mismo juego para poder cargarlo.`);
+    }
+
+    const bytes = this._base64ToBytes(payload.data);
+    await this._applyStateBytes(bytes, payload.kind || 'state');
+
+    let record = null;
+    try {
+      record = await retroStorage.saveEmulatorState(this.currentGame, payload.name || 'Importada', payload.data, payload.kind || 'state');
+    } catch (err) {
+      saveVerifyError('No se pudo indexar localmente la partida importada (se cargó igualmente)', this.currentGame.id, err);
+    }
+    return record || payload;
   }
 
   // [SAVE-VERIFY] gameManager puede tardar en aparecer tras el arranque,
