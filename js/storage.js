@@ -3,15 +3,33 @@
  * -----------------------------------------------------------------------
  * Capa de persistencia de RetroPlay.
  *
- * PARTIDAS GUARDADAS ("save states"): viven EXCLUSIVAMENTE en Firebase
- * (Auth + Firestore), como una "memory card" personal ligada a la cuenta
- * del usuario. No hay IndexedDB, no hay localStorage, no hay autosave:
- * la única forma de guardar o cargar una partida es a través del botón
- * "Guardar partida" (pide un nombre elegido por el usuario, p.ej.
- * "partida naves 1") y el botón "Cargar partida" (lista esas partidas
- * por nombre) de la topbar del emulador. Ver RetroPlayStorage más abajo.
+ * PARTIDAS GUARDADAS ("save states"): modelo LOCAL-FIRST.
  *
- * Para activar Firebase:
+ *   1. SIEMPRE se guardan en este navegador, en IndexedDB (objectStore
+ *      `saveStates`). Esto NO requiere sesión iniciada, NO requiere red,
+ *      y es lo único de lo que depende que "Guardar partida" / "Cargar
+ *      partida" funcionen siempre. Es la fuente de verdad.
+ *   2. Si además el usuario tiene sesión de Firebase iniciada, cada
+ *      guardado se sube TAMBIÉN a Firestore (mismo id que la copia
+ *      local) como respaldo en la nube / sincronización entre
+ *      dispositivos. Es "best effort": si falla (sin red, reglas de
+ *      Firestore, sesión caducada...) el guardado local ya hecho no se
+ *      deshace ni se convierte en un error para el usuario -- solo se
+ *      registra en consola con el prefijo [SAVE-VERIFY].
+ *   3. Cualquier partida (recién capturada o ya guardada) se puede
+ *      además exportar a un archivo .json descargable, y ese archivo se
+ *      puede volver a importar más tarde (mismo navegador, otro
+ *      navegador, otro dispositivo) -- ver downloadSaveStateFile() /
+ *      readSaveStateFile() más abajo. Es la tercera vía de persistencia
+ *      que pidió el usuario, totalmente independiente de Firebase e
+ *      IndexedDB.
+ *
+ * Guardar/cargar partidas por tanto NUNCA depende de que Firebase esté
+ * bien configurado, de que el usuario haya iniciado sesión, ni de tener
+ * conexión a internet -- solo lo necesitas si además quieres la copia en
+ * la nube.
+ *
+ * Para activar el respaldo en la nube (opcional):
  *   1. Crear un proyecto en https://console.firebase.google.com
  *   2. Activar Authentication -> Sign-in method -> Google y Email/contraseña
  *   3. Crear una base de datos Firestore (modo producción)
@@ -29,8 +47,7 @@
  *        }
  *
  * OTRAS FUNCIONALIDADES (favoritos, "recientemente jugado", configuración
- * de mando) siguen guardándose localmente en IndexedDB: no son "partidas"
- * y el usuario no pidió tocarlas.
+ * de mando) siguen guardándose localmente en IndexedDB igual que antes.
  * -----------------------------------------------------------------------
  */
 
@@ -46,13 +63,14 @@ const FIREBASE_CONFIG = {
 };
 
 const DB_NAME = 'retroplay-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // v2: añade el objectStore `saveStates` (partidas guardadas locales)
 
 const STORES = {
   favorites: 'favorites',           // { gameId, addedAt }
   recentlyPlayed: 'recentlyPlayed', // { gameId, lastPlayedAt, progressPct }
   gamepadConfig: 'gamepadConfig',   // { id: 'default' | padId, mapping }
-  settings: 'settings'              // { key, value }
+  settings: 'settings',             // { key, value }
+  saveStates: 'saveStates'          // { id, gameId, gameName, consoleId, name, data, kind, updatedAt }
 };
 
 // -----------------------------------------------------------------------
@@ -99,6 +117,10 @@ class LocalStorageAdapter {
         }
         if (!db.objectStoreNames.contains(STORES.settings)) {
           db.createObjectStore(STORES.settings, { keyPath: 'key' });
+        }
+        if (!db.objectStoreNames.contains(STORES.saveStates)) {
+          const store = db.createObjectStore(STORES.saveStates, { keyPath: 'id' });
+          store.createIndex('gameId', 'gameId', { unique: false });
         }
       };
 
@@ -177,10 +199,12 @@ class LocalStorageAdapter {
 }
 
 /**
- * Adaptador de Firebase. Es OBLIGATORIO para guardar/cargar partidas:
- * sin sesión iniciada no hay memory card a la que escribir ni leer. Se
- * instancia siempre que el SDK de Firebase esté cargado en la página
- * (ver los <script> en index.html), independientemente de las demás
+ * Adaptador de Firebase. OPCIONAL para guardar/cargar partidas: solo se
+ * usa como respaldo en la nube cuando hay sesión iniciada (ver
+ * RetroPlayStorage.saveEmulatorState/loadEmulatorState más abajo, que
+ * usan local -- IndexedDB -- como fuente de verdad). Se instancia
+ * siempre que el SDK de Firebase esté cargado en la página (ver los
+ * <script> en index.html), independientemente de las demás
  * funcionalidades de la app (favoritos, etc.), que no dependen de esto.
  */
 class FirebaseAdapter {
@@ -256,26 +280,14 @@ class FirebaseAdapter {
   }
 
   /**
-   * Guarda una partida nueva con el nombre elegido por el usuario, como
-   * una entrada más de su memory card en Firestore. Cada guardado crea
-   * un documento propio (no sobrescribe por juego) -- así el usuario
-   * puede tener "partida naves 1", "partida naves 2", "juego retro 2",
-   * etc., todas a la vez, tal como pidió.
+   * Sube (o sobrescribe) una copia en la nube de un registro de partida
+   * que YA EXISTE localmente -- por eso recibe el `record` completo, id
+   * incluido, en vez de generar uno nuevo aquí: así la copia local y la
+   * copia en la nube comparten siempre el mismo id.
    */
-  async createSaveState({ gameId, gameName, consoleId, name, data, kind }) {
+  async createSaveState(record) {
     const col = this._saveStatesCol();
-    const docRef = col.doc();
-    const record = {
-      id: docRef.id,
-      gameId,
-      gameName: gameName || gameId,
-      consoleId: consoleId || null,
-      name,
-      data,
-      kind: kind || 'state',
-      updatedAt: Date.now()
-    };
-    await docRef.set(record);
+    await col.doc(record.id).set(record);
     return record;
   }
 
@@ -378,16 +390,26 @@ class RetroPlayStorage {
     return all.sort((a, b) => b.lastPlayedAt - a.lastPlayedAt).slice(0, limit);
   }
 
-  // ---------- Partidas guardadas (memory card en Firebase) ----------
+  // ---------- Partidas guardadas (local-first + nube opcional + archivo) ----------
   //
-  // Único mecanismo de guardado/carga de RetroPlay. No hay slots, no hay
-  // "auto", no hay IndexedDB ni localStorage de por medio: cada partida
-  // guardada es un documento en Firestore, bajo la cuenta del usuario,
-  // identificado por el NOMBRE que él mismo eligió al guardar.
-  //
-  // [SAVE-VERIFY] Si Firebase no está configurado o el usuario no ha
-  // iniciado sesión, esto lanza en vez de fallar en silencio -- la capa
-  // de UI (emulator.js / app.js) es responsable de mostrar ese error.
+  // Ver el comentario grande al principio del archivo para el diseño
+  // completo. Resumen: local (IndexedDB) es SIEMPRE la fuente de verdad
+  // y nunca falla por temas de sesión/red; Firebase es un respaldo en la
+  // nube best-effort; downloadSaveStateFile/readSaveStateFile cubren la
+  // tercera vía (archivo) sin depender de ninguna de las otras dos.
+
+  _genSaveId() {
+    return `save_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  /**
+   * Guarda una partida nueva con el nombre elegido por el usuario. SIEMPRE
+   * se persiste en local (IndexedDB de este navegador) -- eso es lo que
+   * garantiza que esta función nunca falle por Firebase. Cada guardado
+   * crea un registro propio (no sobrescribe por juego) -- así el usuario
+   * puede tener "partida naves 1", "partida naves 2", "juego retro 2",
+   * etc., todas a la vez, tal como pidió.
+   */
   async saveEmulatorState(game, name, data, kind = 'state') {
     const cleanName = (name || '').trim();
     if (!cleanName) {
@@ -395,63 +417,155 @@ class RetroPlayStorage {
       saveVerifyError(err.message);
       throw err;
     }
-    try {
-      const record = await this.firebase.createSaveState({
-        gameId: game.id,
-        gameName: game.name || game.title || game.id,
-        consoleId: game.console,
-        name: cleanName,
-        data,
-        kind
-      });
-      saveVerifyLog('Firebase: partida guardada', `"${cleanName}"`, game.id, `(${data.length} chars base64)`);
-      return record;
-    } catch (err) {
-      saveVerifyError('Firebase: FALLÓ al guardar la partida', `"${cleanName}"`, game.id, err);
-      // [SAVE-VERIFY] El SDK de Firebase siempre da el mensaje en inglés
-      // (p.ej. "Missing or insufficient permissions.") y no dice cómo
-      // solucionarlo. Se traducen los códigos más habituales a un aviso
-      // accionable en español; el error original ya quedó registrado tal
-      // cual arriba para depurar. Cualquier otro código (red, cuota...)
-      // sigue propagándose sin modificar, como antes.
-      if (err && err.code === 'permission-denied') {
-        throw new Error('Firebase rechazó el guardado por falta de permisos. Revisa las reglas de seguridad de Firestore en la consola de tu proyecto (ver el comentario al principio de storage.js).');
+    const record = {
+      id: this._genSaveId(),
+      gameId: game.id,
+      gameName: game.name || game.title || game.id,
+      consoleId: game.console,
+      name: cleanName,
+      data,
+      kind: kind || 'state',
+      updatedAt: Date.now()
+    };
+
+    // [SAVE-VERIFY] Esto es lo único que DEBE funcionar siempre. Si esto
+    // lanza (p. ej. IndexedDB deshabilitado y sin cuota en el fallback de
+    // memoria), es un error real que sí debe llegar al usuario.
+    await this.local.put(STORES.saveStates, record);
+    saveVerifyLog('Local: partida guardada', `"${cleanName}"`, game.id, `(${data.length} chars base64)`);
+
+    // Respaldo en la nube: solo si hay sesión iniciada, y nunca bloqueante.
+    if (this.firebase.enabled && this.firebase.isSignedIn()) {
+      try {
+        await this.firebase.createSaveState(record);
+        saveVerifyLog('Firebase: copia en la nube subida', `"${cleanName}"`, game.id);
+      } catch (err) {
+        saveVerifyError('Firebase: no se pudo subir la copia en la nube (la partida local SÍ se guardó)', game.id, err);
       }
-      if (err && err.code === 'unauthenticated') {
-        throw new Error('Tu sesión ha caducado. Vuelve a iniciar sesión e inténtalo de nuevo.');
-      }
-      throw err;
     }
+
+    return record;
   }
 
+  /**
+   * Carga una partida por id. Se busca primero en local (inmediato, sin
+   * red); si no aparece ahí -- p. ej. se guardó desde otro
+   * navegador/dispositivo con la misma cuenta -- se busca en Firebase y,
+   * si aparece, se copia también a local para la próxima vez.
+   */
   async loadEmulatorState(saveId) {
-    try {
-      const record = await this.firebase.getSaveState(saveId);
-      if (record) {
-        saveVerifyLog('Firebase: partida cargada', `"${record.name}"`, record.gameId, `(${record.data.length} chars base64)`);
-      } else {
-        saveVerifyLog('Firebase: no se encontró la partida', saveId);
-      }
-      return record;
-    } catch (err) {
-      saveVerifyError('Firebase: FALLÓ al cargar la partida', saveId, err);
-      throw err;
+    const local = await this.local.get(STORES.saveStates, saveId);
+    if (local) {
+      saveVerifyLog('Local: partida cargada', `"${local.name}"`, local.gameId, `(${local.data.length} chars base64)`);
+      return local;
     }
+
+    if (this.firebase.enabled && this.firebase.isSignedIn()) {
+      try {
+        const remote = await this.firebase.getSaveState(saveId);
+        if (remote) {
+          saveVerifyLog('Firebase: partida cargada', `"${remote.name}"`, remote.gameId, `(${remote.data.length} chars base64)`);
+          try { await this.local.put(STORES.saveStates, remote); } catch (_) { /* solo caché, no crítico */ }
+          return remote;
+        }
+      } catch (err) {
+        saveVerifyError('Firebase: FALLÓ al cargar la partida', saveId, err);
+      }
+    }
+
+    saveVerifyLog('No se encontró la partida', saveId);
+    return null;
   }
 
-  /** Todas las partidas guardadas del usuario (cualquier juego). */
+  /** Todas las partidas guardadas del usuario: local + nube (si hay sesión), sin duplicados. */
   async listAllSaveStates() {
-    return this.firebase.listSaveStates();
+    const local = await this.local.getAll(STORES.saveStates);
+    const byId = new Map(local.map(s => [s.id, s]));
+
+    if (this.firebase.enabled && this.firebase.isSignedIn()) {
+      try {
+        const remote = await this.firebase.listSaveStates();
+        for (const r of remote) {
+          const existing = byId.get(r.id);
+          if (!existing || (r.updatedAt || 0) > (existing.updatedAt || 0)) {
+            byId.set(r.id, r);
+          }
+        }
+      } catch (err) {
+        saveVerifyError('Firebase: no se pudo listar la copia en la nube (se muestran solo las partidas locales)', err);
+      }
+    }
+
+    return Array.from(byId.values()).sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   /** Partidas guardadas del usuario para un juego concreto. */
   async listSaveStatesForGame(gameId) {
-    const all = await this.firebase.listSaveStates();
+    const all = await this.listAllSaveStates();
     return all.filter(s => s.gameId === gameId);
   }
 
   async deleteSaveState(saveId) {
-    return this.firebase.deleteSaveState(saveId);
+    await this.local.delete(STORES.saveStates, saveId);
+    if (this.firebase.enabled && this.firebase.isSignedIn()) {
+      try {
+        await this.firebase.deleteSaveState(saveId);
+      } catch (err) {
+        saveVerifyError('Firebase: no se pudo eliminar la copia en la nube', saveId, err);
+      }
+    }
+  }
+
+  // ---------- Partidas guardadas como archivo (tercera vía, sin nube ni sesión) ----------
+  //
+  // Convierte un registro de partida (el mismo shape que usan local y
+  // Firebase: {gameId, gameName, consoleId, name, data, kind}) en un
+  // archivo .json descargable, y viceversa. Totalmente independiente de
+  // IndexedDB y de Firebase -- sirve para hacer una copia de seguridad
+  // manual o para llevar una partida a otro navegador/dispositivo.
+
+  downloadSaveStateFile(record) {
+    const payload = {
+      app: 'RetroPlay',
+      formatVersion: 1,
+      exportedAt: Date.now(),
+      gameId: record.gameId,
+      gameName: record.gameName,
+      consoleId: record.consoleId,
+      name: record.name,
+      kind: record.kind || 'state',
+      data: record.data
+    };
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const safeBase = `${payload.gameId || 'partida'}_${payload.name || 'guardado'}`
+      .replace(/[^a-z0-9_-]+/gi, '_')
+      .slice(0, 80);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${safeBase}.rpstate.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    saveVerifyLog('Archivo: partida exportada', `"${payload.name}"`, payload.gameId);
+    return payload;
+  }
+
+  async readSaveStateFile(file) {
+    if (!file) throw new Error('No se seleccionó ningún archivo.');
+    const text = await file.text();
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch (err) {
+      throw new Error('Ese archivo no es una partida válida de RetroPlay (JSON inválido).');
+    }
+    if (!payload || !payload.data) {
+      throw new Error('Ese archivo no contiene datos de partida.');
+    }
+    saveVerifyLog('Archivo: partida leída', `"${payload.name || '(sin nombre)'}"`, payload.gameId);
+    return payload;
   }
 
   // ---------- Configuración de mando ----------
